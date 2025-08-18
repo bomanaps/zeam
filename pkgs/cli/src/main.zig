@@ -19,6 +19,7 @@ const ChainOptions = configs.ChainOptions;
 const utilsLib = @import("@zeam/utils");
 
 const sftFactory = @import("@zeam/state-transition");
+const metrics = @import("@zeam/metrics");
 
 const networks = @import("@zeam/network");
 
@@ -122,6 +123,7 @@ pub fn main() !void {
             }
         },
         .beam => {
+            try metrics.start();
             std.debug.print("beam opts ={any}\n", .{opts.args.__commands__.beam});
 
             const mock_network = opts.args.__commands__.beam.mockNetwork;

@@ -2,6 +2,7 @@ const ssz = @import("ssz");
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const types = @import("@zeam/types");
+const metrics = @import("@zeam/metrics");
 pub const utils = @import("./utils.zig");
 
 const zeam_utils = @import("@zeam/utils");
@@ -245,7 +246,9 @@ pub fn apply_raw_block(allocator: Allocator, state: *types.BeamState, block: *ty
     try process_slots(allocator, state, block.slot);
 
     // process block and modify the pre state to post state
+    const timer = metrics.block_processing_duration_seconds_start();
     try process_block(allocator, state, block.*, logger);
+    timer.observe();
 
     logger.debug("extracting state root\n", .{});
     // extract the post state root
@@ -278,6 +281,8 @@ pub fn apply_transition(allocator: Allocator, state: *types.BeamState, signedBlo
 
     // process the block
     try process_block(allocator, state, block, logger);
+    const timer = metrics.block_processing_duration_seconds_start();
+    timer.observe();
 
     // verify the post state root
     var state_root: [32]u8 = undefined;
