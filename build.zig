@@ -44,6 +44,10 @@ pub fn build(b: *Builder) !void {
         .target = target,
         .optimize = optimize,
     }).module("xev");
+    const metrics = b.dependency("metrics", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("metrics");
 
     // add zeam-params
     const zeam_utils = b.addModule("@zeam/utils", .{
@@ -78,6 +82,14 @@ pub fn build(b: *Builder) !void {
     zeam_configs.addImport("@zeam/types", zeam_types);
     zeam_configs.addImport("@zeam/params", zeam_params);
 
+    // add zeam-metrics
+    const zeam_metrics = b.addModule("@zeam/metrics", .{
+        .root_source_file = b.path("pkgs/metrics/src/lib.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    zeam_metrics.addImport("metrics", metrics);
+
     // add zeam-state-transition
     const zeam_state_transition = b.addModule("@zeam/state-transition", .{
         .root_source_file = b.path("pkgs/state-transition/src/lib.zig"),
@@ -88,6 +100,7 @@ pub fn build(b: *Builder) !void {
     zeam_state_transition.addImport("@zeam/params", zeam_params);
     zeam_state_transition.addImport("@zeam/types", zeam_types);
     zeam_state_transition.addImport("ssz", ssz);
+    zeam_state_transition.addImport("@zeam/metrics", zeam_metrics);
 
     // add state proving manager
     const zeam_state_proving_manager = b.addModule("@zeam/state-proving-manager", .{
@@ -99,6 +112,8 @@ pub fn build(b: *Builder) !void {
     zeam_state_proving_manager.addImport("@zeam/utils", zeam_utils);
     zeam_state_proving_manager.addImport("@zeam/state-transition", zeam_state_transition);
     zeam_state_proving_manager.addImport("ssz", ssz);
+
+    
 
     const st_lib = b.addStaticLibrary(.{
         .name = "zeam-state-transition",
@@ -157,6 +172,8 @@ pub fn build(b: *Builder) !void {
     cli_exe.root_module.addImport("@zeam/state-proving-manager", zeam_state_proving_manager);
     cli_exe.root_module.addImport("@zeam/network", zeam_network);
     cli_exe.root_module.addImport("@zeam/node", zeam_beam_node);
+    cli_exe.root_module.addImport("@zeam/metrics", zeam_metrics);
+    cli_exe.root_module.addImport("metrics", metrics);
 
     addZkvmGlueLibs(b, cli_exe);
     cli_exe.linkLibC(); // for rust static libs to link
@@ -165,7 +182,7 @@ pub fn build(b: *Builder) !void {
     cli_exe.addLibraryPath(b.path("zig-out/bin"));
     b.installArtifact(cli_exe);
 
-    try build_zkvm_targets(b, &cli_exe.step, target);
+    try build_zkvm_targets(b, &cli_exe.step, target, zeam_metrics);
 
     // build the libp2p glue
     var libp2p_cmd = build_rust_project(b, "pkgs/network/rustlibp2p-bridge");
@@ -268,7 +285,7 @@ fn build_rust_project(b: *Builder, path: []const u8) *Builder.Step.Run {
     });
 }
 
-fn build_zkvm_targets(b: *Builder, main_exe: *Builder.Step, host_target: std.Build.ResolvedTarget) !void {
+fn build_zkvm_targets(b: *Builder, main_exe: *Builder.Step, host_target: std.Build.ResolvedTarget, zeam_metrics_module: *std.Build.Module) !void {
     const optimize = .ReleaseFast;
 
     for (zkvm_targets) |zkvm_target| {
@@ -322,6 +339,7 @@ fn build_zkvm_targets(b: *Builder, main_exe: *Builder.Step, host_target: std.Bui
         zeam_state_transition.addImport("@zeam/types", zeam_types);
         zeam_state_transition.addImport("ssz", ssz);
         zeam_state_transition.addImport("zkvm", zkvm_module);
+        zeam_state_transition.addImport("@zeam/metrics", zeam_metrics_module);
 
         // target has to be riscv5 runtime provable/verifiable on zkVMs
         var exec_name: [256]u8 = undefined;
