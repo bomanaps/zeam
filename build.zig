@@ -198,8 +198,8 @@ pub fn build(b: *Builder) !void {
         run_prover.addArgs(args);
     } else {
         run_prover.addArgs(&[_][]const u8{"prove"});
+        run_prover.addArgs(&[_][]const u8{ "-d", b.fmt("{s}/bin", .{b.install_path}) });
     }
-    run_prover.addArgs(&[_][]const u8{ "-d", b.fmt("{s}/bin", .{b.install_path}) });
     run_prover.step.dependOn(&libp2p_install_cmd.step);
 
     const test_step = b.step("test", "Run unit tests");
