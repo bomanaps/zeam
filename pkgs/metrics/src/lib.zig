@@ -20,3 +20,13 @@ pub fn start() !void {
 pub fn block_processing_duration_seconds_start() Timer {
     return Timer.start();
 }
+
+// Compatibility alias so call sites can use `metrics.block_processing_duration_seconds.start()`
+pub const block_processing_duration_seconds = Timer;
+
+// Chain onBlock processing duration (sample metric requested)
+pub const chain_onblock_duration_seconds = Timer;
+
+pub fn chain_onblock_duration_seconds_start() Timer {
+    return Timer.start();
+}

@@ -153,6 +153,7 @@ pub fn build(b: *Builder) !void {
     zeam_beam_node.addImport("@zeam/configs", zeam_configs);
     zeam_beam_node.addImport("@zeam/state-transition", zeam_state_transition);
     zeam_beam_node.addImport("@zeam/network", zeam_network);
+    zeam_beam_node.addImport("@zeam/metrics", zeam_metrics);
 
     // Create build options
     const build_options = b.addOptions();
