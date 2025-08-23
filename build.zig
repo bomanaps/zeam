@@ -119,8 +119,6 @@ pub fn build(b: *Builder) !void {
     zeam_state_proving_manager.addImport("@zeam/state-transition", zeam_state_transition);
     zeam_state_proving_manager.addImport("ssz", ssz);
 
-    
-
     const st_lib = b.addStaticLibrary(.{
         .name = "zeam-state-transition",
         .root_source_file = b.path("pkgs/state-transition/src/lib.zig"),
