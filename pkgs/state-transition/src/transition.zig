@@ -282,7 +282,7 @@ pub fn apply_transition(allocator: Allocator, state: *types.BeamState, signedBlo
     try process_slots(allocator, state, block.slot);
 
     // process the block
-    const timer = metrics.block_processing_duration_seconds_start();
+    const timer = metrics.block_processing_duration_seconds.start();
     try process_block(allocator, state, block, &logger);
     timer.observe();
 
