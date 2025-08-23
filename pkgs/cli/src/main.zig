@@ -123,7 +123,8 @@ pub fn main() !void {
             }
         },
         .beam => {
-            try metrics.start();
+            try metrics.init(allocator);
+            try metrics.startListener(allocator, 9667);
             std.debug.print("beam opts ={any}\n", .{opts.args.__commands__.beam});
 
             const mock_network = opts.args.__commands__.beam.mockNetwork;
