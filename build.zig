@@ -15,8 +15,13 @@ const zkvm_targets: []const zkvmTarget = &.{
 };
 
 // Add the glue libs to a compile target
-fn addZkvmGlueLibs(b: *Builder, comp: *Builder.Step.Compile) void {
+fn addRustGlueLib(b: *Builder, comp: *Builder.Step.Compile, target: Builder.ResolvedTarget) void {
     comp.addObjectFile(b.path("rust/target/release/librustglue.a"));
+    // Add macOS framework linking for CLI tests
+    if (target.result.os.tag == .macos) {
+        comp.linkFramework("CoreFoundation");
+        comp.linkFramework("SystemConfiguration");
+    }
 }
 
 pub fn build(b: *Builder) !void {
@@ -169,15 +174,16 @@ pub fn build(b: *Builder) !void {
     cli_exe.root_module.addImport("@zeam/metrics", zeam_metrics);
     cli_exe.root_module.addImport("metrics", metrics);
 
-    addZkvmGlueLibs(b, cli_exe);
+    addRustGlueLib(b, cli_exe, target);
     cli_exe.linkLibC(); // for rust static libs to link
     cli_exe.linkSystemLibrary("unwind"); // to be able to display rust backtraces
-    if (target.result.os.tag == .macos) {
-        cli_exe.linkFramework("CoreFoundation");
-    }
+
     b.installArtifact(cli_exe);
 
     try build_zkvm_targets(b, &cli_exe.step, target, zeam_metrics);
+
+    var zkvm_host_cmd = build_rust_project(b, "rust");
+    cli_exe.step.dependOn(&zkvm_host_cmd.step);
 
     const run_prover = b.addRunArtifact(cli_exe);
     const prover_step = b.step("run", "Run cli executable");
@@ -219,6 +225,7 @@ pub fn build(b: *Builder) !void {
         .target = target,
     });
     manager_tests.root_module.addImport("@zeam/types", zeam_types);
+    addRustGlueLib(b, manager_tests, target);
     const run_manager_test = b.addRunArtifact(manager_tests);
     test_step.dependOn(&run_manager_test.step);
 
@@ -235,10 +242,7 @@ pub fn build(b: *Builder) !void {
         .optimize = optimize,
         .target = target,
     });
-    addZkvmGlueLibs(b, cli_tests);
-    if (target.result.os.tag == .macos) {
-        cli_tests.linkFramework("CoreFoundation");
-    }
+    addRustGlueLib(b, cli_tests, target);
     const run_cli_test = b.addRunArtifact(cli_tests);
     test_step.dependOn(&run_cli_test.step);
 
@@ -249,9 +253,7 @@ pub fn build(b: *Builder) !void {
     });
     const run_params_tests = b.addRunArtifact(params_tests);
     test_step.dependOn(&run_params_tests.step);
-
-    var zkvm_host_cmd = build_rust_project(b, "rust");
-    cli_exe.step.dependOn(&zkvm_host_cmd.step);
+    manager_tests.step.dependOn(&zkvm_host_cmd.step);
     cli_tests.step.dependOn(&zkvm_host_cmd.step);
 }
 
