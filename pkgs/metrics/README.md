@@ -50,7 +50,7 @@ You must have Docker installed.
 From the root of the `zeam` repository, compile the application:
 
 ```sh
-./zig-linux-x86_64-0.14.0/zig build
+zig build
 ```
 
 ### 2. Configure and Run Prometheus
