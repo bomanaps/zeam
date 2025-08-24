@@ -158,7 +158,7 @@ pub fn build(b: *Builder) !void {
     cli_exe.linkSystemLibrary("unwind"); // to be able to display rust backtraces
 
     // Add macOS framework linking for Core Foundation symbols
-    if (builtin.target.os.tag == .macos) {
+    if (target.result.os.tag == .macos) {
         cli_exe.linkFramework("CoreFoundation");
         cli_exe.linkFramework("SystemConfiguration");
     }
@@ -209,7 +209,7 @@ pub fn build(b: *Builder) !void {
     manager_tests.root_module.addImport("@zeam/types", zeam_types);
     addZkvmGlueLibs(b, manager_tests);
     // Add macOS framework linking for tests that use Rust glue
-    if (builtin.target.os.tag == .macos) {
+    if (target.result.os.tag == .macos) {
         manager_tests.linkFramework("CoreFoundation");
         manager_tests.linkFramework("SystemConfiguration");
     }
@@ -231,7 +231,7 @@ pub fn build(b: *Builder) !void {
     });
     addZkvmGlueLibs(b, cli_tests);
     // Add macOS framework linking for CLI tests
-    if (builtin.target.os.tag == .macos) {
+    if (target.result.os.tag == .macos) {
         cli_tests.linkFramework("CoreFoundation");
         cli_tests.linkFramework("SystemConfiguration");
     }
