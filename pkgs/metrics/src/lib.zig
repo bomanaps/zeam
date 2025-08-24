@@ -71,6 +71,13 @@ pub fn init(allocator: std.mem.Allocator) !void {
     _ = allocator; // Not needed for basic histograms
     if (g_initialized) return;
     
+    // For freestanding targets, use no-op metrics
+    if (@import("builtin").target.os.tag == .freestanding) {
+        std.log.info("Using no-op metrics for freestanding target", .{});
+        g_initialized = true;
+        return;
+    }
+    
     metrics = .{
         .chain_onblock_duration_seconds = Metrics.ChainHistogram.init("chain_onblock_duration_seconds", .{
             .help = "Time taken to process a block in the chain's onBlock function."
@@ -86,12 +93,26 @@ pub fn init(allocator: std.mem.Allocator) !void {
 /// Writes metrics to a writer (for Prometheus endpoint).
 pub fn writeMetrics(writer: anytype) !void {
     if (!g_initialized) return error.NotInitialized;
+    
+    // For freestanding targets, write no metrics
+    if (@import("builtin").target.os.tag == .freestanding) {
+        try writer.writeAll("# Metrics disabled for freestanding target\n");
+        return;
+    }
+    
     try metrics_lib.write(&metrics, writer);
 }
 
 /// Starts a simple HTTP server to serve metrics on /metrics endpoint.
 pub fn startListener(allocator: std.mem.Allocator, port: u16) !void {
     if (!g_initialized) return error.NotInitialized;
+    
+    // For freestanding targets, we can't start an HTTP server
+    if (@import("builtin").target.os.tag == .freestanding) {
+        // Just log that metrics are disabled for freestanding targets
+        std.log.info("Metrics server disabled for freestanding target", .{});
+        return;
+    }
     
     const ServerContext = struct {
         allocator: std.mem.Allocator,
@@ -143,6 +164,29 @@ pub fn startListener(allocator: std.mem.Allocator, port: u16) !void {
 
     const thread = try std.Thread.spawn(.{}, ServerContext.run, .{ctx});
     thread.detach();
+}
+
+/// Generates a Prometheus configuration file content based on the metrics port.
+/// This can be used to create a prometheus.yml file that matches the CLI arguments.
+pub fn generatePrometheusConfig(allocator: std.mem.Allocator, metrics_port: u16) ![]u8 {
+    const config_template = 
+        \\global:
+        \\  scrape_interval: 15s
+        \\  evaluation_interval: 15s
+        \\
+        \\scrape_configs:
+        \\  - job_name: 'prometheus'
+        \\    static_configs:
+        \\      - targets: ['localhost:9090']
+        \\
+        \\  - job_name: 'zeam_app'
+        \\    static_configs:
+        \\      - targets: ['host.docker.internal:{d}']
+        \\    scrape_interval: 5s
+        \\
+        ;
+    
+    return std.fmt.allocPrint(allocator, config_template, .{metrics_port});
 }
 
 // Compatibility functions for the old API

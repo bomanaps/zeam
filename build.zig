@@ -106,7 +106,6 @@ pub fn build(b: *Builder) !void {
     zeam_state_transition.addImport("@zeam/params", zeam_params);
     zeam_state_transition.addImport("@zeam/types", zeam_types);
     zeam_state_transition.addImport("ssz", ssz);
-    zeam_state_transition.addImport("@zeam/metrics", zeam_metrics);
 
     // add state proving manager
     const zeam_state_proving_manager = b.addModule("@zeam/state-proving-manager", .{
@@ -186,7 +185,7 @@ pub fn build(b: *Builder) !void {
 
     b.installArtifact(cli_exe);
 
-    try build_zkvm_targets(b, &cli_exe.step, target, zeam_metrics);
+    try build_zkvm_targets(b, &cli_exe.step, target);
 
     var zkvm_host_cmd = build_rust_project(b, "rust");
     cli_exe.step.dependOn(&zkvm_host_cmd.step);
@@ -276,7 +275,7 @@ fn build_rust_project(b: *Builder, path: []const u8) *Builder.Step.Run {
     });
 }
 
-fn build_zkvm_targets(b: *Builder, main_exe: *Builder.Step, host_target: std.Build.ResolvedTarget, zeam_metrics_module: *std.Build.Module) !void {
+fn build_zkvm_targets(b: *Builder, main_exe: *Builder.Step, host_target: std.Build.ResolvedTarget) !void {
     const optimize = .ReleaseFast;
 
     for (zkvm_targets) |zkvm_target| {
@@ -330,7 +329,6 @@ fn build_zkvm_targets(b: *Builder, main_exe: *Builder.Step, host_target: std.Bui
         zeam_state_transition.addImport("@zeam/types", zeam_types);
         zeam_state_transition.addImport("ssz", ssz);
         zeam_state_transition.addImport("zkvm", zkvm_module);
-        zeam_state_transition.addImport("@zeam/metrics", zeam_metrics_module);
 
         // target has to be riscv5 runtime provable/verifiable on zkVMs
         var exec_name: [256]u8 = undefined;

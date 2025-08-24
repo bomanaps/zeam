@@ -13,8 +13,10 @@ The primary components are:
 The following metrics are currently available:
 
 - **`chain_onblock_duration_seconds`** (Histogram)
-  - **Description**: Measures the time taken to process a block within the `chain.onBlock` function.
+  - **Description**: Measures the time taken to process a block within the `chain.onBlock` function (end-to-end block processing).
   - **Labels**: None.
+
+**Note**: The `block_processing_duration_seconds` metric has been removed to simplify the metrics architecture. Block processing is now measured end-to-end at the chain level only.
 
 ## How It Works
 
@@ -22,7 +24,18 @@ The metrics system is initialized at application startup in `pkgs/cli/src/main.z
 
 1.  `metrics.init()` is called once to set up the metric registry and define all histograms, counters, and gauges.
 2.  `metrics.startListener()` is called to spawn a background thread that runs an HTTP server.
-3.  This server listens on port `9667` and exposes all registered metrics at the `/metrics` endpoint, making them available for a Prometheus server to scrape.
+3.  This server listens on a configurable port (default: `9667`) and exposes all registered metrics at the `/metrics` endpoint, making them available for a Prometheus server to scrape.
+
+**Note**: For freestanding targets (zkvm runs), the metrics system operates in no-op mode and does not start an HTTP server.
+
+## Freestanding Target Support
+
+The metrics library automatically detects freestanding targets (like zkvm runs) and operates in no-op mode:
+
+- **Host targets**: Full metrics functionality with HTTP server
+- **Freestanding targets**: No-op metrics that don't use system calls like `std.net` or `std.Thread`
+
+This ensures compatibility with zero-knowledge proof environments where traditional networking and threading are not available.
 
 ## Running for Visualization (Local Setup)
 
@@ -42,12 +55,23 @@ From the root of the `zeam` repository, compile the application:
 
 ### 2. Configure and Run Prometheus
 
-The repository includes a `prometheus.yml` file configured to scrape both the Prometheus server itself and the `zeam` application. 
-
-Run the Prometheus Docker container using **host networking** to allow it to connect to the `zeam` application:
+Generate a Prometheus configuration file that matches your metrics port:
 
 ```sh
-docker run -d --name prometheus --network="host" -v "$(pwd)/prometheus.yml:/etc/prometheus/prometheus.yml" prom/prometheus --config.file=/etc/prometheus/prometheus.yml
+# Generate config with default port (9667)
+./zig-out/bin/zeam generate_prometheus_config
+
+# Or generate config with custom port
+./zig-out/bin/zeam generate_prometheus_config --metricsPort 8080
+```
+
+This creates a `prometheus.yml` file in `pkgs/metrics/prometheus/` configured to scrape both the Prometheus server itself and the `zeam` application. 
+
+Run Prometheus and Grafana using Docker Compose from the metrics folder:
+
+```sh
+cd pkgs/metrics
+docker-compose up -d
 ```
 
 ### 3. Configure and Run Grafana
@@ -68,8 +92,14 @@ docker run -d --name grafana --network="host" grafana/grafana
 Start the `zeam` node in the background. We recommend redirecting its output to a log file.
 
 ```sh
+# Use default metrics port (9667)
 ./zig-out/bin/zeam beam > zeam.log 2>&1 &
+
+# Or use custom metrics port
+./zig-out/bin/zeam beam --metricsPort 8080 > zeam.log 2>&1 &
 ```
+
+**Important**: Make sure the metrics port in your `prometheus.yml` file matches the port used when starting the beam command.
 
 ### 5. Verify and Visualize
 
@@ -78,6 +108,41 @@ Start the `zeam` node in the background. We recommend redirecting its output to 
     ```promql
     histogram_quantile(0.95, sum(rate(chain_onblock_duration_seconds_bucket[5m])) by (le))
     ```
+
+## CLI Commands
+
+The `zeam` executable provides several commands for working with metrics:
+
+### Beam Command
+Run a full Beam node with configurable metrics:
+
+```sh
+# Use default metrics port (9667)
+./zig-out/bin/zeam beam
+
+# Use custom metrics port
+./zig-out/bin/zeam beam --metricsPort 8080
+
+# Use mock network for testing
+./zig-out/bin/zeam beam --mockNetwork --metricsPort 8080
+```
+
+### Generate Prometheus Config
+Generate a Prometheus configuration file that matches your metrics settings:
+
+```sh
+# Generate config with default port (9667)
+./zig-out/bin/zeam generate_prometheus_config
+
+# Generate config with custom port
+./zig-out/bin/zeam generate_prometheus_config --metricsPort 8080
+
+# Output to stdout
+./zig-out/bin/zeam generate_prometheus_config --metricsPort 8080 --output -
+
+# Output to custom file
+./zig-out/bin/zeam generate_prometheus_config --metricsPort 8080 --output custom_prometheus.yml
+```
 
 ## Adding New Metrics
 
