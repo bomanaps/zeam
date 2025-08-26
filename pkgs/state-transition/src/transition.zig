@@ -2,7 +2,6 @@ const ssz = @import("ssz");
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const types = @import("@zeam/types");
-
 pub const utils = @import("./utils.zig");
 
 const zeam_utils = @import("@zeam/utils");
