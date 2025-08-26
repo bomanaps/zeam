@@ -11,7 +11,6 @@ const params = @import("@zeam/params");
 const metrics = @import("@zeam/metrics");
 
 const zeam_utils = @import("@zeam/utils");
-const getLogger = zeam_utils.getLogger;
 
 pub const fcFactory = @import("./forkchoice.zig");
 
@@ -27,10 +26,17 @@ pub const BeamChain = struct {
     // from finalized onwards to recent
     states: std.AutoHashMap(types.Root, types.BeamState),
     nodeId: u32,
+    logger: *const zeam_utils.ZeamLogger,
 
     const Self = @This();
-    pub fn init(allocator: Allocator, config: configs.ChainConfig, anchorState: types.BeamState, nodeId: u32) !Self {
-        const fork_choice = try fcFactory.ForkChoice.init(allocator, config, anchorState);
+    pub fn init(
+        allocator: Allocator,
+        config: configs.ChainConfig,
+        anchorState: types.BeamState,
+        nodeId: u32,
+        logger: *const zeam_utils.ZeamLogger,
+    ) !Self {
+        const fork_choice = try fcFactory.ForkChoice.init(allocator, config, anchorState, logger);
 
         var states = std.AutoHashMap(types.Root, types.BeamState).init(allocator);
         try states.put(fork_choice.head.blockRoot, anchorState);
@@ -41,6 +47,7 @@ pub const BeamChain = struct {
             .forkChoice = fork_choice,
             .allocator = allocator,
             .states = states,
+            .logger = logger,
         };
     }
 
@@ -83,14 +90,12 @@ pub const BeamChain = struct {
             },
         };
 
-        std.debug.print("\n\n\n node-{d}::going for block production opts={any} raw block={any}\n\n", .{ self.nodeId, opts, block });
+        self.logger.debug("node-{d}::going for block production opts={any} raw block={any}", .{ self.nodeId, opts, block });
 
         // 2. apply STF to get post state
-        var logger = getLogger();
-        logger.setActiveLevel(.debug);
-        try stf.apply_raw_block(self.allocator, &post_state, &block, &logger);
+        try stf.apply_raw_block(self.allocator, &post_state, &block, self.logger);
 
-        std.debug.print("\n\n\n applied raw block opts={any} raw block={any}\n\n", .{ opts, block });
+        self.logger.debug("applied raw block opts={any} raw block={any}", .{ opts, block });
 
         // 3. fc onblock
         const fcBlock = try self.forkChoice.onBlock(block, post_state, .{ .currentSlot = block.slot, .blockDelayMs = 0 });
@@ -101,25 +106,25 @@ pub const BeamChain = struct {
 
     pub fn printSlot(self: *Self, slot: usize) !void {
         const fcHead = try self.forkChoice.updateHead();
-        std.debug.print("node-{d}::chain received on slot cb at slot={d} head={any} headslot={d}\n", .{ self.nodeId, slot, fcHead.blockRoot, fcHead.slot });
+        self.logger.debug("node-{d}::chain received on slot cb at slot={d} head={any} headslot={d}", .{ self.nodeId, slot, fcHead.blockRoot, fcHead.slot });
     }
 
     pub fn onGossip(self: *Self, data: *const networks.GossipMessage) !void {
         switch (data.*) {
             .block => |block| {
-                std.debug.print("node-{d}::chain received block onGossip cb at slot={any}\n", .{ self.nodeId, block });
+                self.logger.debug("node-{d}::chain received block onGossip cb at slot={any}", .{ self.nodeId, block });
                 var block_root: [32]u8 = undefined;
                 try ssz.hashTreeRoot(types.BeamBlock, block.message, &block_root, self.allocator);
 
                 //check if we have the block already in forkchoice
                 const hasBlock = self.forkChoice.hasBlock(block_root);
-                std.debug.print("blockroot={any} hasblock={any}\n", .{ block_root, hasBlock });
+                self.logger.debug("blockroot={any} hasblock={any}", .{ block_root, hasBlock });
                 if (!hasBlock) {
                     const hasParentBlock = self.forkChoice.hasBlock(block.message.parent_root);
-                    std.debug.print("block processing is required hasParentBlock={any}\n", .{hasParentBlock});
+                    self.logger.debug("block processing is required hasParentBlock={any}", .{hasParentBlock});
                     if (hasParentBlock) {
                         self.onBlock(block) catch |err| {
-                            std.debug.print("\n\n\n ^^^^^^^^ Block processing error ^^^^^^\n{any}\n", .{err});
+                            self.logger.debug(" ^^^^^^^^ Block processing error ^^^^^^ {any}", .{err});
                         };
                     }
                 }
@@ -137,7 +142,7 @@ pub const BeamChain = struct {
         var post_state = try types.sszClone(self.allocator, types.BeamState, pre_state);
 
         // 2. apply STF to get post state
-        try stf.apply_transition(self.allocator, &post_state, signedBlock, .{});
+        try stf.apply_transition(self.allocator, &post_state, signedBlock, .{ .logger = self.logger });
 
         // 3. fc onblock
         const block = signedBlock.message;
@@ -174,7 +179,9 @@ test "process and add mock blocks into a node's chain" {
     const mock_chain = try stf.genMockChain(allocator, 5, chain_config.genesis);
     const beam_state = mock_chain.genesis_state;
     const nodeid = 10; // random value
-    var beam_chain = try BeamChain.init(allocator, chain_config, beam_state, nodeid);
+    const logger = zeam_utils.getLogger(.info);
+
+    var beam_chain = try BeamChain.init(allocator, chain_config, beam_state, nodeid, &logger);
 
     try std.testing.expect(std.mem.eql(u8, &beam_chain.forkChoice.fcStore.finalized.root, &mock_chain.blockRoots[0]));
     try std.testing.expect(beam_chain.forkChoice.protoArray.nodes.items.len == 1);

@@ -5,6 +5,7 @@ const params = @import("@zeam/params");
 const types = @import("@zeam/types");
 const configs = @import("@zeam/configs");
 const networks = @import("@zeam/network");
+const zeam_utils = @import("@zeam/utils");
 
 const utils = @import("./utils.zig");
 const OnSlotCbWrapper = utils.OnSlotCbWrapper;
@@ -25,6 +26,7 @@ const NodeOpts = struct {
     db: LevelDB,
     validator_ids: ?[]usize = null,
     nodeId: u32 = 0,
+    logger: *const zeam_utils.ZeamLogger,
 };
 
 pub const BeamNode = struct {
@@ -42,7 +44,7 @@ pub const BeamNode = struct {
         const chain = try allocator.create(chainFactory.BeamChain);
         const network = networkFactory.Network.init(opts.backend);
 
-        chain.* = try chainFactory.BeamChain.init(allocator, opts.config, opts.anchorState, opts.nodeId);
+        chain.* = try chainFactory.BeamChain.init(allocator, opts.config, opts.anchorState, opts.nodeId, opts.logger);
         if (opts.validator_ids) |ids| {
             validator = validators.BeamValidator.init(allocator, opts.config, .{ .ids = ids, .chain = chain, .network = network });
         }

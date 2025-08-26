@@ -207,9 +207,10 @@ pub const ForkChoice = struct {
     // data structure to hold validator deltas, could be grown over time as more validators
     // get added
     deltas: std.ArrayList(isize),
+    logger: *const utils.ZeamLogger,
 
     const Self = @This();
-    pub fn init(allocator: Allocator, config: configs.ChainConfig, anchorState: types.BeamState) !Self {
+    pub fn init(allocator: Allocator, config: configs.ChainConfig, anchorState: types.BeamState, logger: *const utils.ZeamLogger) !Self {
         const anchor_block_header = try stf.genStateBlockHeader(allocator, anchorState);
         var anchor_block_root: [32]u8 = undefined;
         try ssz.hashTreeRoot(
@@ -246,6 +247,7 @@ pub const ForkChoice = struct {
             .votes = votes,
             .head = anchor_block,
             .deltas = deltas,
+            .logger = logger,
         };
         _ = try fc.updateHead();
         return fc;
@@ -289,7 +291,7 @@ pub const ForkChoice = struct {
         }
 
         self.fcStore.currentSlot = currentSlot;
-        std.debug.print("\n\n forkchoice ticked slot to {any}\n", .{self.fcStore.currentSlot});
+        self.logger.debug("forkchoice ticked slot to {any}", .{self.fcStore.currentSlot});
         // reset attestations or process checkpoints as prescribed in the specs
     }
 
@@ -360,7 +362,7 @@ pub const ForkChoice = struct {
             _ = parent_block;
 
             if (slot > self.fcStore.currentSlot) {
-                std.debug.print("\n\n slot={any} currentslot={any}\n\n", .{ slot, self.fcStore.currentSlot });
+                self.logger.debug(" slot={any} currentslot={any}", .{ slot, self.fcStore.currentSlot });
                 return ForkChoiceError.FutureSlot;
             } else if (slot < self.fcStore.finalized.slot) {
                 return ForkChoiceError.PreFinalizedSlot;
@@ -426,7 +428,8 @@ test "forkchoice block tree" {
 
     const mock_chain = try stf.genMockChain(allocator, 2, chain_config.genesis);
     var beam_state = mock_chain.genesis_state;
-    var fork_choice = try ForkChoice.init(allocator, chain_config, beam_state);
+    const logger = utils.getLogger(.info);
+    var fork_choice = try ForkChoice.init(allocator, chain_config, beam_state, &logger);
 
     try std.testing.expect(std.mem.eql(u8, &fork_choice.fcStore.finalized.root, &mock_chain.blockRoots[0]));
     try std.testing.expect(fork_choice.protoArray.nodes.items.len == 1);
@@ -437,7 +440,7 @@ test "forkchoice block tree" {
     for (1..mock_chain.blocks.len) |i| {
         // get the block post state
         const block = mock_chain.blocks[i];
-        try stf.apply_transition(allocator, &beam_state, block, .{});
+        try stf.apply_transition(allocator, &beam_state, block, .{ .logger = &logger });
 
         // shouldn't accept a future slot
         const current_slot = block.message.slot;

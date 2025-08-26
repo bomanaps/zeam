@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 
 // having activeLevel non comptime and dynamic allows us env based logging and even a keystroke activated one
 // on a running client, may be can be revised later
-pub fn log(comptime scope: @Type(.enum_literal), activeLevel: std.log.Level, comptime level: std.log.Level, comptime fmt: []const u8, args: anytype) void {
+pub fn comptTimeLog(comptime scope: LoggerScope, activeLevel: std.log.Level, comptime level: std.log.Level, comptime fmt: []const u8, args: anytype) void {
     if (@intFromEnum(level) > @intFromEnum(activeLevel)) {
         return;
     }
@@ -32,75 +32,71 @@ pub fn log(comptime scope: @Type(.enum_literal), activeLevel: std.log.Level, com
     }
 }
 
-// just a handy debugging log used in the project
-pub fn zeamLog(comptime fmt: []const u8, args: anytype) !void {
-    // forcing all logs for now
-    log(std.log.default_log_scope, std.log.Level.debug, std.log.Level.debug, fmt, args);
+pub fn log(scope: LoggerScope, activeLevel: std.log.Level, comptime level: std.log.Level, comptime fmt: []const u8, args: anytype) void {
+    switch (scope) {
+        .default => return comptTimeLog(.default, activeLevel, level, fmt, args),
+        .n1 => return comptTimeLog(.n1, activeLevel, level, fmt, args),
+        .n2 => return comptTimeLog(.n2, activeLevel, level, fmt, args),
+        .n3 => return comptTimeLog(.n3, activeLevel, level, fmt, args),
+    }
 }
 
+//
+const LoggerScope = enum {
+    default,
+    n1,
+    n2,
+    n3,
+};
+
 pub const ZeamLogger = struct {
-    activeLevel: std.log.Level = std.log.Level.debug,
-    comptime scope: @Type(.enum_literal) = std.log.default_log_scope,
-    comptime logFn: @TypeOf(log) = log,
+    activeLevel: std.log.Level,
+    scope: LoggerScope,
 
     const Self = @This();
-    pub fn init(comptime scope: @Type(.enum_literal), logFn: @TypeOf(log)) Self {
+    pub fn init(scope: LoggerScope, activeLevel: std.log.Level) Self {
         return Self{
             .scope = scope,
-            .logFn = logFn,
+            .activeLevel = activeLevel,
         };
     }
 
-    pub fn setActiveLevel(self: *Self, newLevel: std.log.Level) void {
-        self.activeLevel = newLevel;
-    }
-
     pub fn err(
-        self: *Self,
+        self: *const Self,
         comptime fmt: []const u8,
         args: anytype,
     ) void {
-        return self.logFn(self.scope, self.activeLevel, .err, fmt, args);
+        return log(self.scope, self.activeLevel, .err, fmt, args);
     }
 
     pub fn warn(
-        self: *Self,
+        self: *const Self,
         comptime fmt: []const u8,
         args: anytype,
     ) void {
-        return self.logFn(self.scope, self.activeLevel, .warn, fmt, args);
+        return log(self.scope, self.activeLevel, .warn, fmt, args);
     }
     pub fn info(
-        self: *Self,
+        self: *const Self,
         comptime fmt: []const u8,
         args: anytype,
     ) void {
-        return self.logFn(self.scope, self.activeLevel, .info, fmt, args);
+        return log(self.scope, self.activeLevel, .info, fmt, args);
     }
 
     pub fn debug(
-        self: *Self,
+        self: *const Self,
         comptime fmt: []const u8,
         args: anytype,
     ) void {
-        return self.logFn(self.scope, self.activeLevel, .debug, fmt, args);
+        return log(self.scope, self.activeLevel, .debug, fmt, args);
     }
 };
 
-pub fn getScopedLogger(comptime scope: @Type(.enum_literal)) ZeamLogger {
-    return ZeamLogger.init(scope, log);
+pub fn getScopedLogger(comptime scope: LoggerScope, activeLevel: ?std.log.Level) ZeamLogger {
+    return ZeamLogger.init(scope, activeLevel orelse std.log.default_level);
 }
 
-pub fn getLogger() ZeamLogger {
-    return ZeamLogger.init(std.log.default_log_scope, log);
+pub fn getLogger(activeLevel: ?std.log.Level) ZeamLogger {
+    return ZeamLogger.init(std.log.default_log_scope, activeLevel orelse std.log.default_level);
 }
-
-fn noopLog(comptime scope: @Type(.enum_literal), activeLevel: std.log.Level, comptime level: std.log.Level, comptime fmt: []const u8, args: anytype) void {
-    _ = scope;
-    _ = activeLevel;
-    _ = level;
-    _ = fmt;
-    _ = args;
-}
-
-pub const noopLogger = ZeamLogger.init(std.log.default_log_scope, noopLog);
