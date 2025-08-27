@@ -65,7 +65,7 @@ Generate a Prometheus configuration file that matches your metrics port:
 ./zig-out/bin/zeam generate_prometheus_config --metricsPort 8080
 ```
 
-This creates a `prometheus.yml` file in `pkgs/metrics/prometheus/` configured to scrape both the Prometheus server itself and the `zeam` application. 
+By default, this creates a `prometheus.yml` file in your current directory. When run from the root of the `zeam` repository, it automatically places the file in `pkgs/metrics/prometheus/` to support the local Docker Compose setup. 
 
 Run Prometheus and Grafana using Docker Compose from the metrics folder:
 

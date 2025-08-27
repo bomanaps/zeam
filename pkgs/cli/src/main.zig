@@ -41,7 +41,7 @@ const ZeamArgs = struct {
         generate_prometheus_config: struct {
             help: bool = false,
             metricsPort: u16 = 9667,
-            output: []const u8 = "pkgs/metrics/prometheus/prometheus.yml",
+            output: []const u8 = "prometheus.yml",
         },
         prove: struct {
             dist_dir: []const u8 = "zig-out/bin",
@@ -221,18 +221,38 @@ pub fn main() !void {
             try clock.run();
         },
         .generate_prometheus_config => |configcmd| {
+            var output_path = configcmd.output;
+            const default_output_filename = "prometheus.yml";
+            const developer_output_path = "pkgs/metrics/prometheus/prometheus.yml";
+            const developer_check_dir = "pkgs/metrics/prometheus";
+
+            // If the output path is the default filename, check for dev environment.
+            if (std.mem.eql(u8, output_path, default_output_filename)) {
+                if (std.fs.cwd().access(developer_check_dir, .{})) |_| {
+                    // Success! Directory exists.
+                    output_path = developer_output_path;
+                    std.debug.print("Developer environment detected, writing config to: {s}\n", .{output_path});
+                } else |err| {
+                    if (err != error.FileNotFound) {
+                        // A real error occurred
+                        return err;
+                    }
+                    // If it is FileNotFound, we do nothing and proceed.
+                }
+            }
+
             const config_content = try metrics.generatePrometheusConfig(allocator, configcmd.metricsPort);
             defer allocator.free(config_content);
-            
-            if (std.mem.eql(u8, configcmd.output, "-")) {
+
+            if (std.mem.eql(u8, output_path, "-")) {
                 // Output to stdout
                 try std.io.getStdOut().writeAll(config_content);
             } else {
                 // Write to file
-                const file = try std.fs.cwd().createFile(configcmd.output, .{});
+                const file = try std.fs.cwd().createFile(output_path, .{});
                 defer file.close();
                 try file.writeAll(config_content);
-                std.debug.print("Prometheus configuration written to {s}\n", .{configcmd.output});
+                std.debug.print("Prometheus configuration written to {s}\n", .{output_path});
             }
         },
     }
