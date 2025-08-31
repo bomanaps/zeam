@@ -37,67 +37,34 @@ The metrics library automatically detects freestanding targets (like zkvm runs) 
 
 This ensures compatibility with zero-knowledge proof environments where traditional networking and threading are not available.
 
-## Running for Visualization (Local Setup)
+## Running for Visualization
 
-Here is a complete guide to running the `zeam` node and visualizing its metrics in Grafana.
+The dashboards and monitoring infrastructure have been moved to a separate repository: [zeam-dashboards](https://github.com/blockblaz/zeam-dashboards).
 
-### Prerequisites
+### Quick Setup
 
-You must have Docker installed.
+1. **Clone the dashboard repository**:
+   ```sh
+   git clone https://github.com/blockblaz/zeam-dashboards.git
+   cd zeam-dashboards
+   ```
 
-### 1. Build the Application
+2. **Generate Prometheus configuration**:
+   ```sh
+   # From your Zeam repository
+   ./zig-out/bin/zeam generate_prometheus_config --output prometheus/prometheus.yml
+   ```
 
-From the root of the `zeam` repository, compile the application:
+3. **Start the monitoring stack**:
+   ```sh
+   docker-compose up -d
+   ```
 
-```sh
-zig build
-```
+4. **Access dashboards**:
+   - Grafana: http://localhost:3001 (admin/admin)
+   - Prometheus: http://localhost:9090
 
-### 2. Configure and Run Prometheus
-
-Generate a Prometheus configuration file that matches your metrics port:
-
-```sh
-# Generate config with default port (9667)
-./zig-out/bin/zeam generate_prometheus_config
-
-# Or generate config with custom port
-./zig-out/bin/zeam generate_prometheus_config --metricsPort 8080
-```
-
-By default, this creates a `prometheus.yml` file in your current directory. When run from the root of the `zeam` repository, it automatically places the file in `pkgs/metrics/prometheus/` to support the local Docker Compose setup. 
-
-Run Prometheus and Grafana using Docker Compose from the metrics folder:
-
-```sh
-cd pkgs/metrics
-docker-compose up -d
-```
-
-### 3. Configure and Run Grafana
-
-Run the Grafana Docker container, also on the host network:
-
-```sh
-docker run -d --name grafana --network="host" grafana/grafana
-```
-
-- Access Grafana at [http://localhost:3000](http://localhost:3000) (default login: `admin`/`admin`).
-- Add Prometheus as a data source:
-  - **URL**: `http://localhost:9090`
-  - Click "Save & Test".
-
-### 4. Run the Zeam Application
-
-Start the `zeam` node in the background. We recommend redirecting its output to a log file.
-
-```sh
-# Use default metrics port (9667)
-./zig-out/bin/zeam beam > zeam.log 2>&1 &
-
-# Or use custom metrics port
-./zig-out/bin/zeam beam --metricsPort 8080 > zeam.log 2>&1 &
-```
+For detailed setup instructions and troubleshooting, see the [zeam-dashboards repository](https://github.com/blockblaz/zeam-dashboards).
 
 **Important**: Make sure the metrics port in your `prometheus.yml` file matches the port used when starting the beam command.
 
