@@ -38,11 +38,6 @@ const ZeamArgs = struct {
             mockNetwork: bool = false,
             metricsPort: u16 = 9667,
         },
-        generate_prometheus_config: struct {
-            help: bool = false,
-            metricsPort: u16 = 9667,
-            output: []const u8 = "prometheus.yml",
-        },
         prove: struct {
             dist_dir: []const u8 = "zig-out/bin",
             zkvm: stateProvingManager.ZKVMs = .risc0,
@@ -61,7 +56,6 @@ const ZeamArgs = struct {
         pub const __messages__ = .{
             .clock = "Run the clock service for slot timing",
             .beam = "Run a full Beam node",
-            .generate_prometheus_config = "Generate a Prometheus configuration file",
             .prove = "Generate and verify ZK proofs for state transitions on a mock chain",
         };
     },
@@ -131,7 +125,9 @@ pub fn main() !void {
         },
         .beam => |beamcmd| {
             try metrics.init(allocator);
-            try metrics.startListener(allocator, beamcmd.metricsPort);
+            // TODO: Phase 3 - Integrate new HTTP server architecture with metrics routes
+            // try metrics.startListener(allocator, beamcmd.metricsPort);
+            _ = beamcmd.metricsPort; // Suppress unused variable warning
             std.debug.print("beam opts ={any}\n", .{beamcmd});
 
             const mock_network = beamcmd.mockNetwork;
@@ -220,40 +216,6 @@ pub fn main() !void {
             try beam_node_2.run();
             try clock.run();
         },
-        .generate_prometheus_config => |configcmd| {
-            var output_path = configcmd.output;
-            const default_output_filename = "prometheus.yml";
-            const developer_output_path = "pkgs/metrics/prometheus/prometheus.yml";
-            const developer_check_dir = "pkgs/metrics/prometheus";
 
-            // If the output path is the default filename, check for dev environment.
-            if (std.mem.eql(u8, output_path, default_output_filename)) {
-                if (std.fs.cwd().access(developer_check_dir, .{})) |_| {
-                    // Success! Directory exists.
-                    output_path = developer_output_path;
-                    std.debug.print("Developer environment detected, writing config to: {s}\n", .{output_path});
-                } else |err| {
-                    if (err != error.FileNotFound) {
-                        // A real error occurred
-                        return err;
-                    }
-                    // If it is FileNotFound, we do nothing and proceed.
-                }
-            }
-
-            const config_content = try metrics.generatePrometheusConfig(allocator, configcmd.metricsPort);
-            defer allocator.free(config_content);
-
-            if (std.mem.eql(u8, output_path, "-")) {
-                // Output to stdout
-                try std.io.getStdOut().writeAll(config_content);
-            } else {
-                // Write to file
-                const file = try std.fs.cwd().createFile(output_path, .{});
-                defer file.close();
-                try file.writeAll(config_content);
-                std.debug.print("Prometheus configuration written to {s}\n", .{output_path});
-            }
-        },
     }
 }

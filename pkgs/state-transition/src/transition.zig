@@ -245,10 +245,6 @@ pub fn apply_raw_block(allocator: Allocator, state: *types.BeamState, block: *ty
     try process_slots(allocator, state, block.slot);
 
     // process block and modify the pre state to post state
-<<<<<<< HEAD
-    const timer = metrics.block_processing_duration_seconds_start();
-=======
->>>>>>> 7d7bdab (addressed review comments)
     try process_block(allocator, state, block.*, logger);
 
     logger.debug("extracting state root\n", .{});
@@ -282,8 +278,6 @@ pub fn apply_transition(allocator: Allocator, state: *types.BeamState, signedBlo
 
     // process the block
     try process_block(allocator, state, block, logger);
-    const timer = metrics.block_processing_duration_seconds_start();
-    timer.observe();
 
     // verify the post state root
     var state_root: [32]u8 = undefined;

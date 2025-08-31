@@ -112,89 +112,10 @@ pub fn writeMetrics(writer: anytype) !void {
     try metrics_lib.write(&metrics, writer);
 }
 
-/// Starts a simple HTTP server to serve metrics on /metrics endpoint.
-pub fn startListener(allocator: std.mem.Allocator, port: u16) !void {
-    if (!g_initialized) return error.NotInitialized;
+// Routes module for setting up metrics endpoints
+pub const routes = @import("./routes.zig");
 
-    // For ZKVM targets, we can't start an HTTP server
-    if (isZKVM()) {
-        // Just log that metrics are disabled for ZKVM targets
-        std.log.info("Metrics server disabled for ZKVM target", .{});
-        return;
-    }
 
-    const ServerContext = struct {
-        allocator: std.mem.Allocator,
-        port: u16,
-
-        fn run(self: *@This()) !void {
-            const address = try std.net.Address.parseIp4("0.0.0.0", self.port);
-            var server = try address.listen(.{});
-            defer server.deinit();
-
-            std.log.info("Metrics server listening on http://localhost:{d}/metrics", .{self.port});
-
-            while (true) {
-                const connection = server.accept() catch continue;
-                defer connection.stream.close();
-
-                // Simple HTTP response using std.http.Server
-                var buffer: [4096]u8 = undefined;
-                var http_server = std.http.Server.init(connection, &buffer);
-                var request = http_server.receiveHead() catch continue;
-
-                // Check if it's a request to /metrics
-                if (std.mem.eql(u8, request.head.target, "/metrics")) {
-                    var metrics_output = std.ArrayList(u8).init(self.allocator);
-                    defer metrics_output.deinit();
-
-                    writeMetrics(metrics_output.writer()) catch {
-                        _ = request.respond("Internal Server Error\n", .{}) catch {};
-                        continue;
-                    };
-
-                    _ = request.respond(metrics_output.items, .{
-                        .extra_headers = &.{
-                            .{ .name = "content-type", .value = "text/plain; version=0.0.4; charset=utf-8" },
-                        },
-                    }) catch {};
-                } else {
-                    _ = request.respond("Not Found\n", .{ .status = .not_found }) catch {};
-                }
-            }
-        }
-    };
-
-    const ctx = try allocator.create(ServerContext);
-    ctx.* = .{
-        .allocator = allocator,
-        .port = port,
-    };
-
-    const thread = try std.Thread.spawn(.{}, ServerContext.run, .{ctx});
-    thread.detach();
-}
-
-/// Generates a Prometheus configuration file content based on the metrics port.
-/// This can be used to create a prometheus.yml file that matches the CLI arguments.
-pub fn generatePrometheusConfig(allocator: std.mem.Allocator, metrics_port: u16) ![]u8 {
-    const config_template =
-        "global:\n" ++
-        "  scrape_interval: 15s\n" ++
-        "  evaluation_interval: 15s\n" ++
-        "\n" ++
-        "scrape_configs:\n" ++
-        "  - job_name: 'prometheus'\n" ++
-        "    static_configs:\n" ++
-        "      - targets: ['localhost:9090']\n" ++
-        "\n" ++
-        "  - job_name: 'zeam_app'\n" ++
-        "    static_configs:\n" ++
-        "      - targets: ['host.docker.internal:{d}']\n" ++
-        "    scrape_interval: 5s\n";
-
-    return std.fmt.allocPrint(allocator, config_template, .{metrics_port});
-}
 
 // Compatibility functions for the old API
 pub fn chain_onblock_duration_seconds_start() Timer {
