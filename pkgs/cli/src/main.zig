@@ -23,6 +23,8 @@ const metrics = @import("@zeam/metrics");
 
 const networks = @import("@zeam/network");
 
+const generatePrometheusConfig = @import("prometheus.zig").generatePrometheusConfig;
+
 const ZeamArgs = struct {
     genesis: u64 = 1234,
     num_validators: u64 = 4,
@@ -52,11 +54,37 @@ const ZeamArgs = struct {
                 .dist_dir = "Directory where the zkvm guest programs are found",
             };
         },
+        prometheus: struct {
+            help: bool = false,
+
+            __commands__: union(enum) {
+                genconfig: struct {
+                    metrics_port: u16 = 9667,
+                    filename: []const u8 = "prometheus.yml",
+                    help: bool = false,
+
+                    pub const __shorts__ = .{
+                        .metrics_port = .p,
+                        .filename = .f,
+                    };
+
+                    pub const __messages__ = .{
+                        .metrics_port = "Port to use for publishing metrics",
+                        .filename = "output name for the config file",
+                    };
+                },
+
+                pub const __messages__ = .{
+                    .genconfig = "Generate the prometheus configuration file",
+                };
+            },
+        },
 
         pub const __messages__ = .{
             .clock = "Run the clock service for slot timing",
             .beam = "Run a full Beam node",
             .prove = "Generate and verify ZK proofs for state transitions on a mock chain",
+            .prometheus = "Prometheus configuration management",
         };
     },
 
@@ -127,7 +155,6 @@ pub fn main() !void {
             try metrics.init(allocator);
             // TODO: Phase 3 - Integrate new HTTP server architecture with metrics routes
             // try metrics.startListener(allocator, beamcmd.metricsPort);
-            _ = beamcmd.metricsPort; // Suppress unused variable warning
             std.debug.print("beam opts ={any}\n", .{beamcmd});
 
             const mock_network = beamcmd.mockNetwork;
@@ -216,6 +243,14 @@ pub fn main() !void {
             try beam_node_2.run();
             try clock.run();
         },
-
+        .prometheus => |prometheus| switch (prometheus.__commands__) {
+            .genconfig => |genconfig| {
+                const generated_config = try generatePrometheusConfig(allocator, genconfig.metrics_port);
+                const cwd = std.fs.cwd();
+                const config_file = try cwd.createFile(genconfig.filename, .{ .truncate = true });
+                defer config_file.close();
+                try config_file.writeAll(generated_config);
+            },
+        },
     }
 }
