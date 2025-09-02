@@ -20,6 +20,7 @@ const utilsLib = @import("@zeam/utils");
 
 const sftFactory = @import("@zeam/state-transition");
 const metrics = @import("@zeam/metrics");
+const metricsServer = @import("metrics_server.zig");
 
 const networks = @import("@zeam/network");
 
@@ -153,8 +154,14 @@ pub fn main() !void {
         },
         .beam => |beamcmd| {
             try metrics.init(allocator);
-            // TODO: Phase 3 - Integrate new HTTP server architecture with metrics routes
-            // try metrics.startListener(allocator, beamcmd.metricsPort);
+            
+            // Start metrics HTTP server
+            if (!metrics.isZKVM()) {
+                try metricsServer.startMetricsServer(allocator, beamcmd.metricsPort);
+            } else {
+                std.log.info("Skipping HTTP server for ZKVM target", .{});
+            }
+            
             std.debug.print("beam opts ={any}\n", .{beamcmd});
 
             const mock_network = beamcmd.mockNetwork;

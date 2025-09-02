@@ -17,17 +17,3 @@ pub fn metricsHandler(allocator: std.mem.Allocator, request: *std.http.Server.Re
         },
     }) catch {};
 }
-
-/// Returns the metrics route configuration
-pub fn getMetricsRoute() @import("@zeam/utils").Route {
-    return .{
-        .path = "/metrics",
-        .handler = metricsHandler,
-    };
-}
-
-/// Sets up metrics routes on an HTTP server instance
-/// This function can be called to register metrics routes with any HTTP server
-pub fn setupMetricsRoutes(_: std.mem.Allocator, routes: *std.ArrayList(@import("@zeam/utils").Route)) !void {
-    try routes.append(getMetricsRoute());
-}

@@ -1,6 +1,12 @@
 const std = @import("std");
 const metrics_lib = @import("metrics");
 
+/// Error types for the metrics system
+pub const MetricsError = error{
+    ServerAlreadyRunning,
+    MetricsNotInitialized,
+};
+
 /// Returns true if the current target is a ZKVM environment.
 /// This is used to disable metrics in contexts where they don't make sense.
 pub fn isZKVM() bool {
@@ -41,8 +47,6 @@ pub const Timer = struct {
 
     /// Stops the timer and records the duration in the histogram.
     pub fn observe(self: Timer) void {
-        if (isZKVM()) return;
-
         const end_time = getTimestamp();
         const duration_ns = end_time - self.start_time;
 
@@ -114,8 +118,6 @@ pub fn writeMetrics(writer: anytype) !void {
 
 // Routes module for setting up metrics endpoints
 pub const routes = @import("./routes.zig");
-
-
 
 // Compatibility functions for the old API
 pub fn chain_onblock_duration_seconds_start() Timer {

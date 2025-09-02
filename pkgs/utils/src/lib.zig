@@ -9,6 +9,3 @@ pub usingnamespace castFactory;
 
 const logFactory = @import("./log.zig");
 pub usingnamespace logFactory;
-
-const httpFactory = @import("./http.zig");
-pub usingnamespace httpFactory;
