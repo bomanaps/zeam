@@ -154,14 +154,10 @@ pub fn main() !void {
         },
         .beam => |beamcmd| {
             try metrics.init(allocator);
-            
+
             // Start metrics HTTP server
-            if (!metrics.isZKVM()) {
-                try metricsServer.startMetricsServer(allocator, beamcmd.metricsPort);
-            } else {
-                std.log.info("Skipping HTTP server for ZKVM target", .{});
-            }
-            
+            try metricsServer.startMetricsServer(allocator, beamcmd.metricsPort);
+
             std.debug.print("beam opts ={any}\n", .{beamcmd});
 
             const mock_network = beamcmd.mockNetwork;
