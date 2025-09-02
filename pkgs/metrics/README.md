@@ -52,7 +52,7 @@ The dashboards and monitoring infrastructure have been moved to a separate repos
 2. **Generate Prometheus configuration**:
    ```sh
    # From your Zeam repository
-   ./zig-out/bin/zeam generate_prometheus_config --output prometheus/prometheus.yml
+   ./zig-out/bin/zeam prometheus genconfig -f prometheus/prometheus.yml
    ```
 
 3. **Start the monitoring stack**:
