@@ -9,6 +9,40 @@ const xev = @import("xev");
 const interface = @import("./interface.zig");
 const NetworkInterface = interface.NetworkInterface;
 
+/// Writes failed deserialization bytes to disk for debugging purposes
+fn writeFailedBytes(message_bytes: []const u8, message_type: []const u8, allocator: Allocator) void {
+    // Create dumps directory if it doesn't exist
+    std.fs.cwd().makeDir("deserialization_dumps") catch |e| switch (e) {
+        error.PathAlreadyExists => {}, // Directory already exists, continue
+        else => {
+            std.debug.print("Failed to create dumps directory: {any}\n", .{e});
+            return;
+        },
+    };
+
+    // Generate timestamp-based filename
+    const timestamp = std.time.timestamp();
+    const filename = std.fmt.allocPrint(allocator, "deserialization_dumps/failed_{s}_{d}.bin", .{ message_type, timestamp }) catch |e| {
+        std.debug.print("Failed to allocate filename: {any}\n", .{e});
+        return;
+    };
+    defer allocator.free(filename);
+
+    // Write bytes to file
+    const file = std.fs.cwd().createFile(filename, .{ .truncate = true }) catch |e| {
+        std.debug.print("Failed to create file {s}: {any}\n", .{ filename, e });
+        return;
+    };
+    defer file.close();
+
+    file.writeAll(message_bytes) catch |e| {
+        std.debug.print("Failed to write bytes to file {s}: {any}\n", .{ filename, e });
+        return;
+    };
+
+    std.debug.print("Written {d} bytes to {s} for debugging\n", .{ message_bytes.len, filename });
+}
+
 export fn handleMsgFromRustBridge(zigHandler: *EthLibp2p, topic_id: u32, message_ptr: [*]const u8, message_len: usize) void {
     const topic = switch (topic_id) {
         0 => interface.GossipTopic.block,
@@ -25,6 +59,7 @@ export fn handleMsgFromRustBridge(zigHandler: *EthLibp2p, topic_id: u32, message
             var message_data: types.SignedBeamBlock = undefined;
             ssz.deserialize(types.SignedBeamBlock, message_bytes, &message_data, zigHandler.allocator) catch |e| {
                 std.debug.print("!!!! Error in deserializing the signed block message e={any} !!!!\n", .{e});
+                writeFailedBytes(message_bytes, "block", zigHandler.allocator);
                 return;
             };
 
@@ -34,6 +69,7 @@ export fn handleMsgFromRustBridge(zigHandler: *EthLibp2p, topic_id: u32, message
             var message_data: types.SignedVote = undefined;
             ssz.deserialize(types.SignedVote, message_bytes, &message_data, zigHandler.allocator) catch |e| {
                 std.debug.print("!!!! Error in deserializing the signed vote message e={any} !!!!\n", .{e});
+                writeFailedBytes(message_bytes, "vote", zigHandler.allocator);
                 return;
             };
             break :votemessage .{ .vote = message_data };
