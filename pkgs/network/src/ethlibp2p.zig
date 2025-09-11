@@ -185,6 +185,9 @@ test "writeFailedBytes creates file on deserialization failure" {
     // Setup cleanup first to ensure test doesn't pollute directory
     defer std.fs.cwd().deleteTree("deserialization_dumps") catch {};
 
+    // Ensure directory exists before test (CI-safe)
+    std.fs.cwd().makeDir("deserialization_dumps") catch {};
+
     // Create test data that will cause deserialization to fail
     const invalid_bytes = [_]u8{ 0x00, 0x01, 0x02, 0x03, 0x04, 0x05 };
 
