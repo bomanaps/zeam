@@ -182,9 +182,6 @@ test "writeFailedBytes creates file on deserialization failure" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    // Setup cleanup first to ensure test doesn't pollute directory
-    defer std.fs.cwd().deleteTree("deserialization_dumps") catch {};
-
     // Ensure directory exists before test (CI-safe)
     std.fs.cwd().makeDir("deserialization_dumps") catch {};
 
@@ -207,9 +204,16 @@ test "writeFailedBytes creates file on deserialization failure" {
     // Find the created file by iterating through directory
     var iterator = dir.iterate();
     var created_file_name: ?[]const u8 = null;
-    while (iterator.next() catch null) |entry| {
-        if (std.mem.startsWith(u8, entry.name, "failed_test_")) {
-            created_file_name = entry.name;
+    while (true) {
+        const entry = iterator.next() catch |err| {
+            // Handle iterator errors gracefully instead of crashing
+            std.debug.print("Directory iteration error: {any}\n", .{err});
+            break;
+        };
+        if (entry == null) break;
+
+        if (std.mem.startsWith(u8, entry.?.name, "failed_test_")) {
+            created_file_name = entry.?.name;
             break;
         }
     }
@@ -240,4 +244,7 @@ test "writeFailedBytes creates file on deserialization failure" {
     testing.expectEqualSlices(u8, &invalid_bytes, file_contents) catch {
         std.debug.print("File contents don't match expected bytes. Expected: {any}, Got: {any}\n", .{ &invalid_bytes, file_contents });
     };
+
+    // Cleanup after we're done with the directory
+    std.fs.cwd().deleteTree("deserialization_dumps") catch {};
 }
