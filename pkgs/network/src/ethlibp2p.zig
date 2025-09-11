@@ -177,3 +177,64 @@ pub const EthLibp2p = struct {
         } };
     }
 };
+
+test "writeFailedBytes creates file on deserialization failure" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    // Setup cleanup first to ensure test doesn't pollute directory
+    defer std.fs.cwd().deleteTree("deserialization_dumps") catch {};
+
+    // Create test data that will cause deserialization to fail
+    const invalid_bytes = [_]u8{ 0x00, 0x01, 0x02, 0x03, 0x04, 0x05 };
+
+    // Call writeFailedBytes with invalid data
+    writeFailedBytes(&invalid_bytes, "test", allocator);
+
+    // Verify the file was created and contains correct content
+    var dir = std.fs.cwd().openDir("deserialization_dumps", .{}) catch |e| switch (e) {
+        error.FileNotFound => {
+            testing.expect(false) catch {}; // Directory should exist
+            return;
+        },
+        else => return,
+    };
+    defer dir.close();
+
+    // Find the created file by iterating through directory
+    var iterator = dir.iterate();
+    var created_file_name: ?[]const u8 = null;
+    while (iterator.next() catch null) |entry| {
+        if (std.mem.startsWith(u8, entry.name, "failed_test_")) {
+            created_file_name = entry.name;
+            break;
+        }
+    }
+
+    // Verify file was found
+    testing.expect(created_file_name != null) catch {
+        std.debug.print("No test dump file found in deserialization_dumps directory\n", .{});
+        return;
+    };
+
+    // Read and verify file contents
+    const file = dir.openFile(created_file_name.?, .{}) catch |e| {
+        std.debug.print("Failed to open created file: {any}\n", .{e});
+        testing.expect(false) catch {};
+        return;
+    };
+    defer file.close();
+
+    // Read all file contents
+    const file_contents = file.readToEndAlloc(allocator, 1024) catch |e| {
+        std.debug.print("Failed to read file contents: {any}\n", .{e});
+        testing.expect(false) catch {};
+        return;
+    };
+    defer allocator.free(file_contents);
+
+    // Verify the file contains exactly the bytes we provided
+    testing.expectEqualSlices(u8, &invalid_bytes, file_contents) catch {
+        std.debug.print("File contents don't match expected bytes. Expected: {any}, Got: {any}\n", .{ &invalid_bytes, file_contents });
+    };
+}
