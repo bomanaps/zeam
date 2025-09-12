@@ -6,12 +6,11 @@ pub const utils = @import("./utils.zig");
 
 const zeam_utils = @import("@zeam/utils");
 const debugLog = zeam_utils.zeamLog;
-const getLogger = zeam_utils.getLogger;
 
 const params = @import("@zeam/params");
 
 // put the active logs at debug level for now by default
-pub const StateTransitionOpts = struct { logger: *const zeam_utils.ZeamLogger };
+pub const StateTransitionOpts = struct { logger: *zeam_utils.ZeamLogger };
 
 // pub fn process_epoch(state: types.BeamState) void {
 //     // right now nothing to do
@@ -67,7 +66,7 @@ pub fn is_justifiable_slot(finalized: types.Slot, candidate: types.Slot) !bool {
     return false;
 }
 
-fn process_block_header(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, logger: *const zeam_utils.ZeamLogger) !void {
+fn process_block_header(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, logger: *zeam_utils.ZeamLogger) !void {
     logger.debug("process block header\n", .{});
     // very basic process block header
     if (state.slot != block.slot) {
@@ -92,7 +91,7 @@ fn process_execution_payload_header(state: *types.BeamState, block: types.BeamBl
     }
 }
 
-fn process_operations(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, logger: *const zeam_utils.ZeamLogger) !void {
+fn process_operations(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, logger: *zeam_utils.ZeamLogger) !void {
     // transform state data into consumable format, generally one would keep a `cached`/consumable
     // copy of state but we will get to that later especially w.r.t. proving
     // prep data
@@ -146,16 +145,30 @@ fn process_operations(allocator: Allocator, state: *types.BeamState, block: type
         const target_slot: usize = @intCast(vote.target.slot);
         logger.debug("processing vote={any} validator_id={d}\n....\n", .{ vote, validator_id });
 
-        if (justified_slots.items[source_slot] != 1 or
+        const is_source_justified = justified_slots.items[source_slot] == 1;
+        const is_target_already_justified = justified_slots.items[target_slot] == 1;
+        const has_correct_source_root = std.mem.eql(u8, &vote.source.root, &historical_block_hashes.items[source_slot]);
+        const has_correct_target_root = std.mem.eql(u8, &vote.target.root, &historical_block_hashes.items[target_slot]);
+        const target_not_ahead = target_slot <= source_slot;
+        const is_target_justifiable = try is_justifiable_slot(state.latest_finalized.slot, target_slot);
+
+        if (!is_source_justified or
             // not present in 3sf mini but once a target is justified no need to run loop
             // as we remove the target from justifications map as soon as its justified
-            justified_slots.items[target_slot] == 1 or
-            !std.mem.eql(u8, &vote.source.root, &historical_block_hashes.items[source_slot]) or
-            !std.mem.eql(u8, &vote.target.root, &historical_block_hashes.items[target_slot]) or
-            target_slot <= source_slot or
-            try is_justifiable_slot(state.latest_finalized.slot, target_slot) == false)
+            is_target_already_justified or
+            !has_correct_source_root or
+            !has_correct_target_root or
+            target_not_ahead or
+            !is_target_justifiable)
         {
-            logger.debug("~~~~~ skipping the vote as not viable ~~~\n~~~~~~~\n", .{});
+            logger.debug("skipping the vote as not viable: !(source_justified={}) or target_already_justified={} !(correct_source_root={}) or !(correct_target_root={}) or target_not_ahead={} or !(target_justifiable={})", .{
+                is_source_justified,
+                is_target_already_justified,
+                has_correct_source_root,
+                has_correct_target_root,
+                target_not_ahead,
+                is_target_justifiable,
+            });
             continue;
         }
 
@@ -234,14 +247,14 @@ fn process_operations(allocator: Allocator, state: *types.BeamState, block: type
     logger.debug("poststate: justified={any} finalized={any}\n---------------\n------------\n\n\n", .{ state.latest_justified, state.latest_finalized });
 }
 
-pub fn process_block(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, logger: *const zeam_utils.ZeamLogger) !void {
+pub fn process_block(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, logger: *zeam_utils.ZeamLogger) !void {
     // start block processing
     try process_block_header(allocator, state, block, logger);
     try process_execution_payload_header(state, block);
     try process_operations(allocator, state, block, logger);
 }
 
-pub fn apply_raw_block(allocator: Allocator, state: *types.BeamState, block: *types.BeamBlock, logger: *const zeam_utils.ZeamLogger) !void {
+pub fn apply_raw_block(allocator: Allocator, state: *types.BeamState, block: *types.BeamBlock, logger: *zeam_utils.ZeamLogger) !void {
     // prepare pre state to process block for that slot, may be rename prepare_pre_state
     try process_slots(allocator, state, block.slot);
 

@@ -199,8 +199,12 @@ pub const ForkChoiceStore = struct {
 };
 
 const ProtoVote = struct {
+    //
     index: usize = 0,
     slot: types.Slot = 0,
+    // we can construct proto votes from the anchor state justifications but will not exactly know
+    // the votes
+    vote: ?types.SignedVote = null,
 };
 
 const VoteTracker = struct {
@@ -226,10 +230,10 @@ pub const ForkChoice = struct {
     // data structure to hold validator deltas, could be grown over time as more validators
     // get added
     deltas: std.ArrayList(isize),
-    logger: *const utils.ZeamLogger,
+    logger: *utils.ZeamLogger,
 
     const Self = @This();
-    pub fn init(allocator: Allocator, config: configs.ChainConfig, anchorState: types.BeamState, logger: *const utils.ZeamLogger) !Self {
+    pub fn init(allocator: Allocator, config: configs.ChainConfig, anchorState: types.BeamState, logger: *utils.ZeamLogger) !Self {
         const anchor_block_header = try stf.genStateBlockHeader(allocator, anchorState);
         var anchor_block_root: [32]u8 = undefined;
         try ssz.hashTreeRoot(
@@ -365,6 +369,27 @@ pub const ForkChoice = struct {
         };
     }
 
+    pub fn getProposalVotes(self: *Self) ![]types.SignedVote {
+        var included_votes = std.ArrayList(types.SignedVote).init(self.allocator);
+        const latest_justified = self.fcStore.latest_justified;
+
+        // TODO naive strategy to include all votes that are consistent with the latest justified
+        // replace by the other mini 3sf simple strategy to loop and see if justification happens and
+        // till no further votes can be added
+        for (0..self.config.genesis.num_validators) |validator_id| {
+            const validator_vote = ((self.votes.get(validator_id) orelse VoteTracker{})
+                //
+                .latestKnown orelse ProtoVote{}).vote;
+
+            if (validator_vote) |signed_vote| {
+                if (std.mem.eql(u8, &latest_justified.root, &signed_vote.message.source.root)) {
+                    try included_votes.append(signed_vote);
+                }
+            }
+        }
+        return included_votes.toOwnedSlice();
+    }
+
     pub fn getVoteTarget(self: *Self) !types.Mini3SFCheckpoint {
         var target_idx = self.protoArray.indices.get(self.head.blockRoot) orelse return ForkChoiceError.InvalidHeadIndex;
         const nodes = self.protoArray.nodes.items;
@@ -464,28 +489,30 @@ pub const ForkChoice = struct {
         // update latest known voted head of the validator if already included on chain
         if (is_from_block) {
             const vote_tracker_latest_known_slot = (vote_tracker.latestKnown orelse ProtoVote{}).slot;
-            if (vote.head.slot > vote_tracker_latest_known_slot) {
+            if (vote.slot > vote_tracker_latest_known_slot) {
                 vote_tracker.latestKnown = .{
                     //
                     .index = new_head_index,
-                    .slot = vote.head.slot,
+                    .slot = vote.slot,
+                    .vote = signed_vote,
                 };
             }
 
             // also clear out our latest new non included vote if this is even later than that
             const vote_tracker_latest_new_slot = (vote_tracker.latestNew orelse ProtoVote{}).slot;
-            if (vote.head.slot > vote_tracker_latest_new_slot) {
+            if (vote.slot > vote_tracker_latest_new_slot) {
                 vote_tracker.latestNew = null;
             }
         } else {
             if (vote.slot > self.fcStore.timeSlots) return ForkChoiceError.InvalidFutureAttestation;
             // just update latest new voted head of the validator
             const vote_tracker_latest_new_slot = (vote_tracker.latestNew orelse ProtoVote{}).slot;
-            if (vote.head.slot > vote_tracker_latest_new_slot) {
+            if (vote.slot > vote_tracker_latest_new_slot) {
                 vote_tracker.latestNew = .{
                     //
                     .index = new_head_index,
-                    .slot = vote.head.slot,
+                    .slot = vote.slot,
+                    .vote = signed_vote,
                 };
             }
         }
@@ -571,7 +598,7 @@ test "forkchoice block tree" {
 
     const mock_chain = try stf.genMockChain(allocator, 2, chain_config.genesis);
     var beam_state = mock_chain.genesis_state;
-    const logger = utils.getLogger(.info);
+    var logger = utils.getLogger(.info, null);
     var fork_choice = try ForkChoice.init(allocator, chain_config, beam_state, &logger);
 
     try std.testing.expect(std.mem.eql(u8, &fork_choice.fcStore.latest_finalized.root, &mock_chain.blockRoots[0]));
