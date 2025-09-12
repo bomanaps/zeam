@@ -312,7 +312,7 @@ pub fn main() !void {
 
             // Use all validators for sim (single node simulation)
             var validator_ids = [_]usize{ 1, 2, 3 };
-            const logger = utilsLib.getScopedLogger(.n1, .debug);
+            var logger = utilsLib.getScopedLogger(.n1, .debug, null);
 
             var beam_node = try BeamNode.init(allocator, .{
                 .nodeId = 0,
