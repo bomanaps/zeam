@@ -14,12 +14,12 @@ const NetworkInterface = interface.NetworkInterface;
 /// Writes failed deserialization bytes to disk for debugging purposes
 /// Returns true if the file was successfully created, false otherwise
 /// If timestamp is null, generates a new timestamp automatically
-fn writeFailedBytes(message_bytes: []const u8, message_type: []const u8, allocator: Allocator, timestamp: ?i64) bool {
+fn writeFailedBytes(message_bytes: []const u8, message_type: []const u8, allocator: Allocator, timestamp: ?i64, logger: *const zeam_utils.ZeamLogger) bool {
     // Create dumps directory if it doesn't exist
     std.fs.cwd().makeDir("deserialization_dumps") catch |e| switch (e) {
         error.PathAlreadyExists => {}, // Directory already exists, continue
         else => {
-            std.debug.print("Failed to create dumps directory: {any}\n", .{e});
+            logger.err("Failed to create dumps directory: {any}", .{e});
             return false;
         },
     };
@@ -27,24 +27,24 @@ fn writeFailedBytes(message_bytes: []const u8, message_type: []const u8, allocat
     // Generate timestamp-based filename
     const actual_timestamp = timestamp orelse std.time.timestamp();
     const filename = std.fmt.allocPrint(allocator, "deserialization_dumps/failed_{s}_{d}.bin", .{ message_type, actual_timestamp }) catch |e| {
-        std.debug.print("Failed to allocate filename: {any}\n", .{e});
+        logger.err("Failed to allocate filename: {any}", .{e});
         return false;
     };
     defer allocator.free(filename);
 
     // Write bytes to file
     const file = std.fs.cwd().createFile(filename, .{ .truncate = true }) catch |e| {
-        std.debug.print("Failed to create file {s}: {any}\n", .{ filename, e });
+        logger.err("Failed to create file {s}: {any}", .{ filename, e });
         return false;
     };
     defer file.close();
 
     file.writeAll(message_bytes) catch |e| {
-        std.debug.print("Failed to write bytes to file {s}: {any}\n", .{ filename, e });
+        logger.err("Failed to write bytes to file {s}: {any}", .{ filename, e });
         return false;
     };
 
-    std.debug.print("Written {d} bytes to {s} for debugging\n", .{ message_bytes.len, filename });
+    logger.debug("Written {d} bytes to {s} for debugging", .{ message_bytes.len, filename });
     return true;
 }
 
@@ -53,7 +53,7 @@ export fn handleMsgFromRustBridge(zigHandler: *EthLibp2p, topic_id: u32, message
         0 => interface.GossipTopic.block,
         1 => interface.GossipTopic.vote,
         else => {
-            std.debug.print("\n!!!! Ignoring Invalid topic_id={d} sent in handleMsgFromRustBridge !!!!\n", .{topic_id});
+            zigHandler.logger.err("Ignoring Invalid topic_id={d} sent in handleMsgFromRustBridge", .{topic_id});
             return;
         },
     };
@@ -63,8 +63,8 @@ export fn handleMsgFromRustBridge(zigHandler: *EthLibp2p, topic_id: u32, message
         .block => blockmessage: {
             var message_data: types.SignedBeamBlock = undefined;
             ssz.deserialize(types.SignedBeamBlock, message_bytes, &message_data, zigHandler.allocator) catch |e| {
-                std.debug.print("!!!! Error in deserializing the signed block message e={any} !!!!\n", .{e});
-                _ = writeFailedBytes(message_bytes, "block", zigHandler.allocator, null);
+                zigHandler.logger.err("Error in deserializing the signed block message e={any}", .{e});
+                _ = writeFailedBytes(message_bytes, "block", zigHandler.allocator, null, zigHandler.logger);
                 return;
             };
 
@@ -73,19 +73,19 @@ export fn handleMsgFromRustBridge(zigHandler: *EthLibp2p, topic_id: u32, message
         .vote => votemessage: {
             var message_data: types.SignedVote = undefined;
             ssz.deserialize(types.SignedVote, message_bytes, &message_data, zigHandler.allocator) catch |e| {
-                std.debug.print("!!!! Error in deserializing the signed vote message e={any} !!!!\n", .{e});
-                _ = writeFailedBytes(message_bytes, "vote", zigHandler.allocator, null);
+                zigHandler.logger.err("Error in deserializing the signed vote message e={any}", .{e});
+                _ = writeFailedBytes(message_bytes, "vote", zigHandler.allocator, null, zigHandler.logger);
                 return;
             };
             break :votemessage .{ .vote = message_data };
         },
     };
 
-    std.debug.print("\nnetwork-{d}:: !!!handleMsgFromRustBridge topic={any}:: message={any} from bytes={any} \n", .{ zigHandler.params.networkId, topic, message, message_bytes });
+    zigHandler.logger.debug("network-{d}:: handleMsgFromRustBridge topic={any} message={any} from bytes={any}", .{ zigHandler.params.networkId, topic, message, message_bytes });
 
     // TODO: figure out why scheduling on the loop is not working
     zigHandler.gossipHandler.onGossip(&message, false) catch |e| {
-        std.debug.print("!!!! onGossip handling of message failed with error e={any} !!!!\n", .{e});
+        zigHandler.logger.err("onGossip handling of message failed with error e={any}", .{e});
     };
 }
 
@@ -115,6 +115,7 @@ pub const EthLibp2p = struct {
     gossipHandler: interface.GenericGossipHandler,
     params: EthLibp2pParams,
     rustBridgeThread: ?Thread = null,
+    logger: *const zeam_utils.ZeamLogger,
 
     const Self = @This();
 
@@ -124,7 +125,7 @@ pub const EthLibp2p = struct {
         params: EthLibp2pParams,
         logger: *const zeam_utils.ZeamLogger,
     ) !Self {
-        return Self{ .allocator = allocator, .params = params, .gossipHandler = try interface.GenericGossipHandler.init(allocator, loop, params.networkId, logger) };
+        return Self{ .allocator = allocator, .params = params, .gossipHandler = try interface.GenericGossipHandler.init(allocator, loop, params.networkId, logger), .logger = logger };
     }
 
     pub fn run(self: *Self) !void {
@@ -228,6 +229,9 @@ test "writeFailedBytes creates file with correct content" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
+    // Create a test logger
+    var test_logger = zeam_utils.getLogger(null, null);
+
     // Ensure directory exists before test (CI-safe)
     std.fs.cwd().makeDir("deserialization_dumps") catch {};
 
@@ -236,7 +240,7 @@ test "writeFailedBytes creates file with correct content" {
 
     // Test case 1: Valid data that should succeed
     const valid_bytes = [_]u8{ 0x00, 0x01, 0x02, 0x03, 0x04, 0x05 };
-    const result1 = writeFailedBytes(&valid_bytes, "test", allocator, test_timestamp);
+    const result1 = writeFailedBytes(&valid_bytes, "test", allocator, test_timestamp, &test_logger);
     testing.expect(result1 == true) catch {
         std.debug.print("writeFailedBytes should return true for valid data\n", .{});
     };
@@ -265,7 +269,7 @@ test "writeFailedBytes creates file with correct content" {
 
     // Test case 2: Empty data that should still succeed
     const empty_bytes = [_]u8{};
-    const result2 = writeFailedBytes(&empty_bytes, "empty", allocator, test_timestamp);
+    const result2 = writeFailedBytes(&empty_bytes, "empty", allocator, test_timestamp, &test_logger);
     testing.expect(result2 == true) catch {
         std.debug.print("writeFailedBytes should return true for empty data\n", .{});
     };
