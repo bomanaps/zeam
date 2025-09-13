@@ -212,7 +212,7 @@ pub fn main() !void {
                 network.* = try networks.Mock.init(allocator, loop, &logger1);
                 backend1 = network.getNetworkInterface();
                 backend2 = network.getNetworkInterface();
-                logger1.debug("---\n\n mock gossip {any}\n\n", .{backend1.gossip});
+                logger1.debug("--- mock gossip {any}", .{backend1.gossip});
             } else {
                 var network1: *networks.EthLibp2p = try allocator.create(networks.EthLibp2p);
                 const listen_addresses1 = &[_]Multiaddr{try Multiaddr.fromString(allocator, "/ip4/0.0.0.0/tcp/9001")};
@@ -232,7 +232,7 @@ pub fn main() !void {
                 network2.* = try networks.EthLibp2p.init(allocator, loop, .{ .networkId = 1, .listen_addresses = listen_addresses2, .connect_peers = connect_peers }, &logger2);
                 try network2.run();
                 backend2 = network2.getNetworkInterface();
-                logger1.debug("---\n\n ethlibp2p gossip {any}\n\n", .{backend1.gossip});
+                logger1.debug("--- ethlibp2p gossip {any}", .{backend1.gossip});
             }
 
             var clock = try allocator.create(Clock);
