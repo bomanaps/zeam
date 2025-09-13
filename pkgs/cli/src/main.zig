@@ -303,17 +303,17 @@ pub fn main() !void {
             const loop = try allocator.create(xev.Loop);
             loop.* = try xev.Loop.init(.{});
 
+            // Use all validators for sim (single node simulation)
+            var validator_ids = [_]usize{ 1, 2, 3 };
+            var logger = utilsLib.getScopedLogger(.n1, .debug, null);
+
             // Single node with mock network for in-process simulation
             var network: *networks.Mock = try allocator.create(networks.Mock);
-            network.* = try networks.Mock.init(allocator, loop);
+            network.* = try networks.Mock.init(allocator, loop, &logger);
             const backend = network.getNetworkInterface();
 
             var clock = try allocator.create(Clock);
             clock.* = try Clock.init(allocator, chain_config.genesis.genesis_time, loop);
-
-            // Use all validators for sim (single node simulation)
-            var validator_ids = [_]usize{ 1, 2, 3 };
-            var logger = utilsLib.getScopedLogger(.n1, .debug, null);
 
             var beam_node = try BeamNode.init(allocator, .{
                 .nodeId = 0,
