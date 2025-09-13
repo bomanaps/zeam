@@ -6,6 +6,7 @@ const ssz = @import("ssz");
 const types = @import("@zeam/types");
 const xev = @import("xev");
 const Multiaddr = @import("multiformats").multiaddr.Multiaddr;
+const zeam_utils = @import("@zeam/utils");
 
 const interface = @import("./interface.zig");
 const NetworkInterface = interface.NetworkInterface;
@@ -121,8 +122,9 @@ pub const EthLibp2p = struct {
         allocator: Allocator,
         loop: *xev.Loop,
         params: EthLibp2pParams,
+        logger: *const zeam_utils.ZeamLogger,
     ) !Self {
-        return Self{ .allocator = allocator, .params = params, .gossipHandler = try interface.GenericGossipHandler.init(allocator, loop, params.networkId) };
+        return Self{ .allocator = allocator, .params = params, .gossipHandler = try interface.GenericGossipHandler.init(allocator, loop, params.networkId, logger) };
     }
 
     pub fn run(self: *Self) !void {
@@ -158,7 +160,7 @@ pub const EthLibp2p = struct {
                 break :votebytes serialized.items;
             },
         };
-        std.debug.print("\n\nnetwork-{d}:: calling publish_msg_to_rust_bridge with byes={any} for data={any}\n\n", .{ self.params.networkId, message, data });
+        self.gossipHandler.logger.debug("network-{d}:: calling publish_msg_to_rust_bridge with message={any} for data={any}", .{ self.params.networkId, message, data });
         publish_msg_to_rust_bridge(self.params.networkId, topic_id, message.ptr, message.len);
     }
 
