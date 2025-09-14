@@ -279,13 +279,3 @@ pub fn main() !void {
         },
     }
 }
-
-// Import tests
-test {
-    _ = @import("cli_unit_tests.zig");
-
-    // Conditionally import integration tests based on build option
-    if (build_options.enable_sim_tests) {
-        _ = @import("cli_integration_tests.zig");
-    }
-}

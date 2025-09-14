@@ -32,6 +32,9 @@ pub fn build(b: *Builder) !void {
     // Get git commit hash as version
     const git_version = b.option([]const u8, "git_version", "Git commit hash for version") orelse "unknown";
 
+    // Get enable_sim_tests option
+    const enable_sim_tests = b.option(bool, "enable_sim_tests", "Enable slow CLI integration tests") orelse false;
+
     // add ssz
     const ssz = b.dependency("ssz", .{
         .target = target,
@@ -170,7 +173,7 @@ pub fn build(b: *Builder) !void {
     // Create build options
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "version", git_version);
-    build_options.addOption(bool, "enable_sim_tests", b.option(bool, "enable_sim_tests", "Enable slow CLI integration tests") orelse false);
+    build_options.addOption(bool, "enable_sim_tests", enable_sim_tests);
     const build_options_module = build_options.createModule();
 
     // Add the cli executable
@@ -281,14 +284,35 @@ pub fn build(b: *Builder) !void {
     const run_node_test = b.addRunArtifact(node_tests);
     test_step.dependOn(&run_node_test.step);
 
-    const cli_tests = b.addTest(.{
-        .root_module = cli_exe.root_module,
+    // CLI integration tests (separate target)
+    const cli_integration_tests = b.addTest(.{
+        .root_source_file = b.path("pkgs/cli/test/integration.zig"),
         .optimize = optimize,
         .target = target,
     });
-    addRustGlueLib(b, cli_tests, target);
-    const run_cli_test = b.addRunArtifact(cli_tests);
-    test_step.dependOn(&run_cli_test.step);
+    // Add all the same dependencies as the main CLI executable
+    cli_integration_tests.root_module.addImport("ssz", ssz);
+    cli_integration_tests.root_module.addImport("build_options", build_options_module);
+    cli_integration_tests.root_module.addImport("simargs", simargs);
+    cli_integration_tests.root_module.addImport("xev", xev);
+    cli_integration_tests.root_module.addImport("@zeam/utils", zeam_utils);
+    cli_integration_tests.root_module.addImport("@zeam/params", zeam_params);
+    cli_integration_tests.root_module.addImport("@zeam/types", zeam_types);
+    cli_integration_tests.root_module.addImport("@zeam/configs", zeam_configs);
+    cli_integration_tests.root_module.addImport("@zeam/state-transition", zeam_state_transition);
+    cli_integration_tests.root_module.addImport("@zeam/state-proving-manager", zeam_state_proving_manager);
+    cli_integration_tests.root_module.addImport("@zeam/network", zeam_network);
+    cli_integration_tests.root_module.addImport("@zeam/node", zeam_beam_node);
+    cli_integration_tests.root_module.addImport("@zeam/metrics", zeam_metrics);
+    cli_integration_tests.root_module.addImport("metrics", metrics);
+    cli_integration_tests.root_module.addImport("multiformats", multiformats);
+    addRustGlueLib(b, cli_integration_tests, target);
+
+    // Conditionally include integration tests based on build option
+    if (enable_sim_tests) {
+        const run_cli_integration_test = b.addRunArtifact(cli_integration_tests);
+        test_step.dependOn(&run_cli_integration_test.step);
+    }
 
     const params_tests = b.addTest(.{
         .root_module = zeam_params,
@@ -310,7 +334,7 @@ pub fn build(b: *Builder) !void {
     test_step.dependOn(&run_network_tests.step);
 
     manager_tests.step.dependOn(&zkvm_host_cmd.step);
-    cli_tests.step.dependOn(&zkvm_host_cmd.step);
+    cli_integration_tests.step.dependOn(&zkvm_host_cmd.step);
 
     const tools_test_step = b.step("test-tools", "Run zeam tools tests");
     const tools_cli_tests = b.addTest(.{
