@@ -378,6 +378,8 @@ pub fn build(b: *Builder) !void {
         false, // don't include optional dependencies (enr, yaml)
     );
     addRustGlueLib(b, cli_integration_tests, target);
+    cli_integration_tests.linkLibC(); // for rust static libs to link
+    cli_integration_tests.linkSystemLibrary("unwind"); // to be able to display rust backtraces
 
     // Conditionally include simulation tests based on build option
     if (enable_sim_tests) {
