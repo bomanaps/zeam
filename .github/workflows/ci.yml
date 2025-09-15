@@ -77,7 +77,7 @@ jobs:
       run: zig build test --summary all
     
     - name: Run simulation tests
-      run: zig build test -Denable_sim_tests=true --summary all
+      run: zig build test -Dsim_tests_only=true --summary all
       timeout-minutes: 30
 
   docker-build:

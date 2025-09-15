@@ -35,6 +35,9 @@ pub fn build(b: *Builder) !void {
     // Get enable_sim_tests option
     const enable_sim_tests = b.option(bool, "enable_sim_tests", "Enable slow CLI integration tests") orelse false;
 
+    // Get sim_tests_only option
+    const sim_tests_only = b.option(bool, "sim_tests_only", "Run only simulation/integration tests") orelse false;
+
     // add ssz
     const ssz = b.dependency("ssz", .{
         .target = target,
@@ -181,6 +184,7 @@ pub fn build(b: *Builder) !void {
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "version", git_version);
     build_options.addOption(bool, "enable_sim_tests", enable_sim_tests);
+    build_options.addOption(bool, "sim_tests_only", sim_tests_only);
     const build_options_module = build_options.createModule();
 
     // Helper function to add common CLI test dependencies
@@ -299,57 +303,7 @@ pub fn build(b: *Builder) !void {
 
     const test_step = b.step("test", "Run zeam core tests");
 
-    // CLI unit tests - run unit tests embedded in CLI source files
-    const cli_tests = b.addTest(.{
-        .root_module = cli_exe.root_module,
-    });
-    // Make CLI unit tests depend on CLI executable build (for Rust dependencies)
-    cli_tests.step.dependOn(&cli_exe.step);
-    addRustGlueLib(b, cli_tests, target);
-    const run_cli_test = b.addRunArtifact(cli_tests);
-    test_step.dependOn(&run_cli_test.step);
-
-    const types_tests = b.addTest(.{
-        .root_module = zeam_types,
-        .optimize = optimize,
-        .target = target,
-    });
-    types_tests.root_module.addImport("ssz", ssz);
-    const run_types_test = b.addRunArtifact(types_tests);
-    test_step.dependOn(&run_types_test.step);
-
-    const transition_tests = b.addTest(.{
-        .root_module = zeam_state_transition,
-        .optimize = optimize,
-        .target = target,
-    });
-    // TODO(gballet) typing modules each time is quite tedious, hopefully
-    // this will no longer be necessary in later versions of zig.
-    transition_tests.root_module.addImport("@zeam/types", zeam_types);
-    transition_tests.root_module.addImport("@zeam/params", zeam_params);
-    transition_tests.root_module.addImport("ssz", ssz);
-    const run_transition_test = b.addRunArtifact(transition_tests);
-    test_step.dependOn(&run_transition_test.step);
-
-    const manager_tests = b.addTest(.{
-        .root_module = zeam_state_proving_manager,
-        .optimize = optimize,
-        .target = target,
-    });
-    manager_tests.root_module.addImport("@zeam/types", zeam_types);
-    addRustGlueLib(b, manager_tests, target);
-    const run_manager_test = b.addRunArtifact(manager_tests);
-    test_step.dependOn(&run_manager_test.step);
-
-    const node_tests = b.addTest(.{
-        .root_module = zeam_beam_node,
-        .optimize = optimize,
-        .target = target,
-    });
-    const run_node_test = b.addRunArtifact(node_tests);
-    test_step.dependOn(&run_node_test.step);
-
-    // CLI integration tests (separate target)
+    // CLI integration tests (separate target) - always create this test target
     const cli_integration_tests = b.addTest(.{
         .root_source_file = b.path("pkgs/cli/test/integration.zig"),
         .optimize = optimize,
@@ -381,45 +335,105 @@ pub fn build(b: *Builder) !void {
     cli_integration_tests.linkLibC(); // for rust static libs to link
     cli_integration_tests.linkSystemLibrary("unwind"); // to be able to display rust backtraces
 
-    // Conditionally include simulation tests based on build option
-    if (enable_sim_tests) {
+    // If sim_tests_only is true, only run integration tests
+    if (sim_tests_only) {
         const run_cli_integration_test = b.addRunArtifact(cli_integration_tests);
         test_step.dependOn(&run_cli_integration_test.step);
+    } else {
+        // Run all other tests when sim_tests_only is false
+        // CLI unit tests - run unit tests embedded in CLI source files
+        const cli_tests = b.addTest(.{
+            .root_module = cli_exe.root_module,
+        });
+        // Make CLI unit tests depend on CLI executable build (for Rust dependencies)
+        cli_tests.step.dependOn(&cli_exe.step);
+        addRustGlueLib(b, cli_tests, target);
+        const run_cli_test = b.addRunArtifact(cli_tests);
+        test_step.dependOn(&run_cli_test.step);
+
+        const types_tests = b.addTest(.{
+            .root_module = zeam_types,
+            .optimize = optimize,
+            .target = target,
+        });
+        types_tests.root_module.addImport("ssz", ssz);
+        const run_types_test = b.addRunArtifact(types_tests);
+        test_step.dependOn(&run_types_test.step);
+
+        const transition_tests = b.addTest(.{
+            .root_module = zeam_state_transition,
+            .optimize = optimize,
+            .target = target,
+        });
+        // TODO(gballet) typing modules each time is quite tedious, hopefully
+        // this will no longer be necessary in later versions of zig.
+        transition_tests.root_module.addImport("@zeam/types", zeam_types);
+        transition_tests.root_module.addImport("@zeam/params", zeam_params);
+        transition_tests.root_module.addImport("ssz", ssz);
+        const run_transition_test = b.addRunArtifact(transition_tests);
+        test_step.dependOn(&run_transition_test.step);
+
+        const manager_tests = b.addTest(.{
+            .root_module = zeam_state_proving_manager,
+            .optimize = optimize,
+            .target = target,
+        });
+        manager_tests.root_module.addImport("@zeam/types", zeam_types);
+        addRustGlueLib(b, manager_tests, target);
+        const run_manager_test = b.addRunArtifact(manager_tests);
+        test_step.dependOn(&run_manager_test.step);
+
+        // Set up dependencies for manager tests
+        manager_tests.step.dependOn(&zkvm_host_cmd.step);
+
+        const node_tests = b.addTest(.{
+            .root_module = zeam_beam_node,
+            .optimize = optimize,
+            .target = target,
+        });
+        const run_node_test = b.addRunArtifact(node_tests);
+        test_step.dependOn(&run_node_test.step);
+
+        // Conditionally include integration tests when enable_sim_tests is true
+        if (enable_sim_tests) {
+            const run_cli_integration_test = b.addRunArtifact(cli_integration_tests);
+            test_step.dependOn(&run_cli_integration_test.step);
+        }
+
+        const params_tests = b.addTest(.{
+            .root_module = zeam_params,
+            .optimize = optimize,
+            .target = target,
+        });
+        const run_params_tests = b.addRunArtifact(params_tests);
+        test_step.dependOn(&run_params_tests.step);
+
+        const network_tests = b.addTest(.{
+            .root_module = zeam_network,
+            .optimize = optimize,
+            .target = target,
+        });
+        network_tests.root_module.addImport("@zeam/types", zeam_types);
+        network_tests.root_module.addImport("xev", xev);
+        network_tests.root_module.addImport("ssz", ssz);
+        const run_network_tests = b.addRunArtifact(network_tests);
+        test_step.dependOn(&run_network_tests.step);
+
+        const tools_test_step = b.step("test-tools", "Run zeam tools tests");
+        const tools_cli_tests = b.addTest(.{
+            .root_module = tools_cli_exe.root_module,
+            .optimize = optimize,
+            .target = target,
+        });
+        tools_cli_tests.root_module.addImport("enr", enr);
+        const run_tools_cli_test = b.addRunArtifact(tools_cli_tests);
+        tools_test_step.dependOn(&run_tools_cli_test.step);
+
+        test_step.dependOn(tools_test_step);
     }
 
-    const params_tests = b.addTest(.{
-        .root_module = zeam_params,
-        .optimize = optimize,
-        .target = target,
-    });
-    const run_params_tests = b.addRunArtifact(params_tests);
-    test_step.dependOn(&run_params_tests.step);
-
-    const network_tests = b.addTest(.{
-        .root_module = zeam_network,
-        .optimize = optimize,
-        .target = target,
-    });
-    network_tests.root_module.addImport("@zeam/types", zeam_types);
-    network_tests.root_module.addImport("xev", xev);
-    network_tests.root_module.addImport("ssz", ssz);
-    const run_network_tests = b.addRunArtifact(network_tests);
-    test_step.dependOn(&run_network_tests.step);
-
-    manager_tests.step.dependOn(&zkvm_host_cmd.step);
+    // Set up dependencies for integration tests (always needed)
     cli_integration_tests.step.dependOn(&zkvm_host_cmd.step);
-
-    const tools_test_step = b.step("test-tools", "Run zeam tools tests");
-    const tools_cli_tests = b.addTest(.{
-        .root_module = tools_cli_exe.root_module,
-        .optimize = optimize,
-        .target = target,
-    });
-    tools_cli_tests.root_module.addImport("enr", enr);
-    const run_tools_cli_test = b.addRunArtifact(tools_cli_tests);
-    tools_test_step.dependOn(&run_tools_cli_test.step);
-
-    test_step.dependOn(tools_test_step);
 }
 
 fn build_rust_project(b: *Builder, path: []const u8) *Builder.Step.Run {
