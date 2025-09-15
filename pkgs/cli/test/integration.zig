@@ -6,7 +6,7 @@ test "CLI beam command with mock network - complete integration test" {
     const allocator = std.testing.allocator;
 
     // Start CLI with beam command and mock network
-    const args = [_][]const u8{ "./zig-out/bin/zeam", "beam", "--mockNetwork", "true" };
+    const args = [_][]const u8{ "$GITHUB_WORKSPACE/zeam/zig-out/bin/zeam", "beam", "--mockNetwork", "true" };
     var cli_process = process.Child.init(&args, allocator);
     defer {
         _ = cli_process.kill() catch {};
