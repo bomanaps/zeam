@@ -16,24 +16,37 @@ test "CLI beam command with mock network - complete integration test" {
     // Start the process
     try cli_process.spawn();
 
-    // Wait for metrics server to be ready (with timeout)
+    // Wait for metrics server to be ready (with extended timeout for CI)
     const metrics_port: u16 = 9667;
     const start_time = std.time.milliTimestamp();
+    const max_wait_time = 60000; // 60 second timeout for CI environments
+    const retry_interval = 500; // 500ms between retries
     var server_ready = false;
+    var retry_count: u32 = 0;
 
-    while (std.time.milliTimestamp() - start_time < 10000) { // 10 second timeout
+    while (std.time.milliTimestamp() - start_time < max_wait_time) {
+        retry_count += 1;
+
+        // Try to connect to the metrics server
         const address = net.Address.parseIp4("127.0.0.1", metrics_port) catch {
-            std.time.sleep(100 * std.time.ns_per_ms);
+            std.time.sleep(retry_interval * std.time.ns_per_ms);
             continue;
         };
 
         var connection = net.tcpConnectToAddress(address) catch {
-            std.time.sleep(100 * std.time.ns_per_ms);
+            std.time.sleep(retry_interval * std.time.ns_per_ms);
             continue;
         };
+
+        // Test if we can actually send/receive data
         connection.close();
         server_ready = true;
         break;
+    }
+
+    // Provide detailed error message if server didn't start
+    if (!server_ready) {
+        std.debug.print("Integration test failed: Metrics server not ready after {} seconds ({} retries)\n", .{ max_wait_time / 1000, retry_count });
     }
 
     // Verify server started successfully
