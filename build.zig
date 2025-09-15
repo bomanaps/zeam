@@ -183,6 +183,52 @@ pub fn build(b: *Builder) !void {
     build_options.addOption(bool, "enable_sim_tests", enable_sim_tests);
     const build_options_module = build_options.createModule();
 
+    // Helper function to add common CLI test dependencies
+    const addCliTestDependencies = struct {
+        fn add(
+            test_module: *Builder.Module,
+            ssz_mod: *Builder.Module,
+            build_options_mod: *Builder.Module,
+            simargs_mod: *Builder.Module,
+            xev_mod: *Builder.Module,
+            zeam_utils_mod: *Builder.Module,
+            zeam_params_mod: *Builder.Module,
+            zeam_types_mod: *Builder.Module,
+            zeam_configs_mod: *Builder.Module,
+            zeam_state_transition_mod: *Builder.Module,
+            zeam_state_proving_manager_mod: *Builder.Module,
+            zeam_network_mod: *Builder.Module,
+            zeam_beam_node_mod: *Builder.Module,
+            zeam_metrics_mod: *Builder.Module,
+            metrics_mod: *Builder.Module,
+            multiformats_mod: *Builder.Module,
+            enr_mod: *Builder.Module,
+            yaml_mod: *Builder.Module,
+            include_optional: bool,
+        ) void {
+            test_module.addImport("ssz", ssz_mod);
+            test_module.addImport("build_options", build_options_mod);
+            test_module.addImport("simargs", simargs_mod);
+            test_module.addImport("xev", xev_mod);
+            test_module.addImport("@zeam/utils", zeam_utils_mod);
+            test_module.addImport("@zeam/params", zeam_params_mod);
+            test_module.addImport("@zeam/types", zeam_types_mod);
+            test_module.addImport("@zeam/configs", zeam_configs_mod);
+            test_module.addImport("@zeam/state-transition", zeam_state_transition_mod);
+            test_module.addImport("@zeam/state-proving-manager", zeam_state_proving_manager_mod);
+            test_module.addImport("@zeam/network", zeam_network_mod);
+            test_module.addImport("@zeam/node", zeam_beam_node_mod);
+            test_module.addImport("@zeam/metrics", zeam_metrics_mod);
+            test_module.addImport("metrics", metrics_mod);
+            test_module.addImport("multiformats", multiformats_mod);
+
+            if (include_optional) {
+                test_module.addImport("enr", enr_mod);
+                test_module.addImport("yaml", yaml_mod);
+            }
+        }
+    };
+
     // Add the cli executable
     const cli_exe = b.addExecutable(.{
         .name = "zeam",
@@ -253,6 +299,13 @@ pub fn build(b: *Builder) !void {
 
     const test_step = b.step("test", "Run zeam core tests");
 
+    // CLI unit tests - run unit tests embedded in CLI source files
+    const cli_tests = b.addTest(.{
+        .root_module = cli_exe.root_module,
+    });
+    const run_cli_test = b.addRunArtifact(cli_tests);
+    test_step.dependOn(&run_cli_test.step);
+
     const types_tests = b.addTest(.{
         .root_module = zeam_types,
         .optimize = optimize,
@@ -300,24 +353,30 @@ pub fn build(b: *Builder) !void {
         .target = target,
     });
     // Add all the same dependencies as the main CLI executable
-    cli_integration_tests.root_module.addImport("ssz", ssz);
-    cli_integration_tests.root_module.addImport("build_options", build_options_module);
-    cli_integration_tests.root_module.addImport("simargs", simargs);
-    cli_integration_tests.root_module.addImport("xev", xev);
-    cli_integration_tests.root_module.addImport("@zeam/utils", zeam_utils);
-    cli_integration_tests.root_module.addImport("@zeam/params", zeam_params);
-    cli_integration_tests.root_module.addImport("@zeam/types", zeam_types);
-    cli_integration_tests.root_module.addImport("@zeam/configs", zeam_configs);
-    cli_integration_tests.root_module.addImport("@zeam/state-transition", zeam_state_transition);
-    cli_integration_tests.root_module.addImport("@zeam/state-proving-manager", zeam_state_proving_manager);
-    cli_integration_tests.root_module.addImport("@zeam/network", zeam_network);
-    cli_integration_tests.root_module.addImport("@zeam/node", zeam_beam_node);
-    cli_integration_tests.root_module.addImport("@zeam/metrics", zeam_metrics);
-    cli_integration_tests.root_module.addImport("metrics", metrics);
-    cli_integration_tests.root_module.addImport("multiformats", multiformats);
+    addCliTestDependencies.add(
+        cli_integration_tests.root_module,
+        ssz,
+        build_options_module,
+        simargs,
+        xev,
+        zeam_utils,
+        zeam_params,
+        zeam_types,
+        zeam_configs,
+        zeam_state_transition,
+        zeam_state_proving_manager,
+        zeam_network,
+        zeam_beam_node,
+        zeam_metrics,
+        metrics,
+        multiformats,
+        enr,
+        yaml,
+        false, // don't include optional dependencies (enr, yaml)
+    );
     addRustGlueLib(b, cli_integration_tests, target);
 
-    // Conditionally include integration tests based on build option
+    // Conditionally include simulation tests based on build option
     if (enable_sim_tests) {
         const run_cli_integration_test = b.addRunArtifact(cli_integration_tests);
         test_step.dependOn(&run_cli_integration_test.step);

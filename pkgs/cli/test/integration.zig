@@ -3,9 +3,7 @@ const process = std.process;
 const net = std.net;
 
 test "CLI beam command with mock network - complete integration test" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = std.testing.allocator;
 
     // Start CLI with beam command and mock network
     const args = [_][]const u8{ "./zig-out/bin/zeam", "beam", "--mockNetwork", "true" };
