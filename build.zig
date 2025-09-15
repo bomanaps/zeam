@@ -303,6 +303,9 @@ pub fn build(b: *Builder) !void {
     const cli_tests = b.addTest(.{
         .root_module = cli_exe.root_module,
     });
+    // Make CLI unit tests depend on CLI executable build (for Rust dependencies)
+    cli_tests.step.dependOn(&cli_exe.step);
+    addRustGlueLib(b, cli_tests, target);
     const run_cli_test = b.addRunArtifact(cli_tests);
     test_step.dependOn(&run_cli_test.step);
 
