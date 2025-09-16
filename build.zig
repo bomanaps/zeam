@@ -260,7 +260,8 @@ pub fn build(b: *Builder) !void {
 
     // Create build options for integration tests with CLI executable path
     const integration_build_options = b.addOptions();
-    integration_build_options.addOption([]const u8, "cli_exe_path", "./zig-out/bin/zeam");
+    const cli_exe_path = b.fmt("{s}/bin/zeam", .{b.install_path});
+    integration_build_options.addOption([]const u8, "cli_exe_path", cli_exe_path);
     const integration_build_options_module = integration_build_options.createModule();
     cli_integration_tests.root_module.addImport("build_options", integration_build_options_module);
 
