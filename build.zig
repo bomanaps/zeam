@@ -179,7 +179,6 @@ pub fn build(b: *Builder) !void {
     build_options.addOption([]const u8, "version", git_version);
     const build_options_module = build_options.createModule();
 
-
     // Add the cli executable
     const cli_exe = b.addExecutable(.{
         .name = "zeam",
@@ -259,6 +258,12 @@ pub fn build(b: *Builder) !void {
     // Add all the same dependencies as the main CLI executable
     cli_integration_tests.root_module.addImport("@zeam/network", zeam_network);
 
+    // Create build options for integration tests with CLI executable path
+    const integration_build_options = b.addOptions();
+    integration_build_options.addOption([]const u8, "cli_exe_path", "./zig-out/bin/zeam");
+    const integration_build_options_module = integration_build_options.createModule();
+    cli_integration_tests.root_module.addImport("build_options", integration_build_options_module);
+
     // Add ethlibp2p exports for Rust linking
     const ethlibp2p_exports = b.addObject(.{
         .name = "ethlibp2p_exports",
@@ -277,9 +282,6 @@ pub fn build(b: *Builder) !void {
     addRustGlueLib(b, cli_integration_tests, target);
     cli_integration_tests.linkLibC(); // for rust static libs to link
     cli_integration_tests.linkSystemLibrary("unwind"); // to be able to display rust backtraces
-    const simtests = b.step("simtest", "Run integration tests");
-    const run_cli_integration_test = b.addRunArtifact(cli_integration_tests);
-    simtests.dependOn(&run_cli_integration_test.step);
 
     const types_tests = b.addTest(.{
         .root_module = zeam_types,
@@ -364,6 +366,20 @@ pub fn build(b: *Builder) !void {
     tools_test_step.dependOn(&run_tools_cli_test.step);
 
     test_step.dependOn(tools_test_step);
+
+    // Create the CLI installation step (reference to existing installation)
+    const install_cli = b.addInstallArtifact(cli_exe, .{});
+
+    // Create simtest step that runs all tests (unit + integration)
+    const simtests = b.step("simtest", "Run all tests including integration tests");
+    const run_cli_integration_test = b.addRunArtifact(cli_integration_tests);
+
+    // Ensure CLI is built and installed before integration tests run
+    simtests.dependOn(&install_cli.step);
+    // Run all unit tests first
+    simtests.dependOn(test_step);
+    // Then run integration tests
+    simtests.dependOn(&run_cli_integration_test.step);
 
     // Set up dependencies for integration tests (always needed)
     cli_integration_tests.step.dependOn(&zkvm_host_cmd.step);

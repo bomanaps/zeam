@@ -1,12 +1,13 @@
 const std = @import("std");
 const process = std.process;
 const net = std.net;
+const build_options = @import("build_options");
 
 test "CLI beam command with mock network - complete integration test" {
     const allocator = std.testing.allocator;
 
-    // Start CLI with beam command and mock network
-    const args = [_][]const u8{ "./zig-out/bin/zeam", "beam", "--mockNetwork", "true" };
+    // Start CLI with beam command and mock network - use build option for executable path
+    const args = [_][]const u8{ build_options.cli_exe_path, "beam", "--mockNetwork", "true" };
     var cli_process = process.Child.init(&args, allocator);
     defer {
         _ = cli_process.kill() catch {};
