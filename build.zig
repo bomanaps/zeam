@@ -179,7 +179,6 @@ pub fn build(b: *Builder) !void {
     build_options.addOption([]const u8, "version", git_version);
     const build_options_module = build_options.createModule();
 
-    // Helper function to add common CLI test dependencies
 
     // Add the cli executable
     const cli_exe = b.addExecutable(.{
@@ -308,6 +307,8 @@ pub fn build(b: *Builder) !void {
 
     const cli_tests = b.addTest(.{
         .root_module = cli_exe.root_module,
+        .optimize = optimize,
+        .target = target,
     });
     cli_tests.step.dependOn(&cli_exe.step);
     addRustGlueLib(b, cli_tests, target);
