@@ -9,6 +9,24 @@ test "CLI beam command with mock network - complete integration test" {
     // Verify executable exists first
     const exe_file = std.fs.openFileAbsolute(build_options.cli_exe_path, .{}) catch |err| {
         std.debug.print("ERROR: Cannot find executable at {s}: {}\n", .{ build_options.cli_exe_path, err });
+
+        // Try to list the directory to see what's actually there
+        std.debug.print("INFO: Attempting to list zig-out/bin directory...\n", .{});
+        const dir_path = std.fs.path.dirname(build_options.cli_exe_path);
+        if (dir_path) |path| {
+            var dir = std.fs.openDirAbsolute(path, .{ .iterate = true }) catch |dir_err| {
+                std.debug.print("ERROR: Cannot open directory {s}: {}\n", .{ path, dir_err });
+                return err;
+            };
+            defer dir.close();
+
+            var iterator = dir.iterate();
+            std.debug.print("INFO: Contents of {s}:\n", .{path});
+            while (try iterator.next()) |entry| {
+                std.debug.print("  - {s} (type: {})\n", .{ entry.name, entry.kind });
+            }
+        }
+
         return err;
     };
     exe_file.close();
