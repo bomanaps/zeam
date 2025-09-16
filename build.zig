@@ -266,17 +266,6 @@ pub fn build(b: *Builder) !void {
     const run_cli_integration_test = b.addRunArtifact(cli_integration_tests);
     simtests.dependOn(&run_cli_integration_test.step);
 
-    // Run all other tests when sim_tests_only is false
-    // CLI unit tests - run unit tests embedded in CLI source files
-    const cli_tests = b.addTest(.{
-        .root_module = cli_exe.root_module,
-    });
-    // Make CLI unit tests depend on CLI executable build (for Rust dependencies)
-    cli_tests.step.dependOn(&cli_exe.step);
-    addRustGlueLib(b, cli_tests, target);
-    const run_cli_test = b.addRunArtifact(cli_tests);
-    test_step.dependOn(&run_cli_test.step);
-
     const types_tests = b.addTest(.{
         .root_module = zeam_types,
         .optimize = optimize,
@@ -309,9 +298,6 @@ pub fn build(b: *Builder) !void {
     const run_manager_test = b.addRunArtifact(manager_tests);
     test_step.dependOn(&run_manager_test.step);
 
-    // Set up dependencies for manager tests
-    manager_tests.step.dependOn(&zkvm_host_cmd.step);
-
     const node_tests = b.addTest(.{
         .root_module = zeam_beam_node,
         .optimize = optimize,
@@ -319,6 +305,14 @@ pub fn build(b: *Builder) !void {
     });
     const run_node_test = b.addRunArtifact(node_tests);
     test_step.dependOn(&run_node_test.step);
+
+    const cli_tests = b.addTest(.{
+        .root_module = cli_exe.root_module,
+    });
+    cli_tests.step.dependOn(&cli_exe.step);
+    addRustGlueLib(b, cli_tests, target);
+    const run_cli_test = b.addRunArtifact(cli_tests);
+    test_step.dependOn(&run_cli_test.step);
 
     const params_tests = b.addTest(.{
         .root_module = zeam_params,
@@ -338,6 +332,9 @@ pub fn build(b: *Builder) !void {
     network_tests.root_module.addImport("ssz", ssz);
     const run_network_tests = b.addRunArtifact(network_tests);
     test_step.dependOn(&run_network_tests.step);
+
+    manager_tests.step.dependOn(&zkvm_host_cmd.step);
+    cli_tests.step.dependOn(&zkvm_host_cmd.step);
 
     const tools_test_step = b.step("test-tools", "Run zeam tools tests");
     const tools_cli_tests = b.addTest(.{
