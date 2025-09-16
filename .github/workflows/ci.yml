@@ -72,14 +72,11 @@ jobs:
       with:
         version: 0.14.1
 
-    - name: Build
-      run: zig build --summary all
-    
     - name: Test
       run: zig build test --summary all
     
     - name: Run simulation tests
-      run: zig build test -Dsim_tests_only=true --summary all
+      run: zig build simtest --summary all
 
   docker-build:
     name: docker-build
