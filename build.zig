@@ -258,6 +258,22 @@ pub fn build(b: *Builder) !void {
     });
     // Add all the same dependencies as the main CLI executable
     cli_integration_tests.root_module.addImport("@zeam/network", zeam_network);
+
+    // Add ethlibp2p exports for Rust linking
+    const ethlibp2p_exports = b.addObject(.{
+        .name = "ethlibp2p_exports",
+        .root_source_file = b.path("pkgs/network/src/ethlibp2p.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    ethlibp2p_exports.root_module.addImport("@zeam/types", zeam_types);
+    ethlibp2p_exports.root_module.addImport("@zeam/utils", zeam_utils);
+    ethlibp2p_exports.root_module.addImport("@zeam/params", zeam_params);
+    ethlibp2p_exports.root_module.addImport("ssz", ssz);
+    ethlibp2p_exports.root_module.addImport("xev", xev);
+    ethlibp2p_exports.root_module.addImport("multiformats", multiformats);
+    cli_integration_tests.addObject(ethlibp2p_exports);
+
     addRustGlueLib(b, cli_integration_tests, target);
     cli_integration_tests.linkLibC(); // for rust static libs to link
     cli_integration_tests.linkSystemLibrary("unwind"); // to be able to display rust backtraces
