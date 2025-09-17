@@ -381,6 +381,9 @@ pub fn build(b: *Builder) !void {
     simtests.dependOn(test_step);
     // Then run integration tests
     simtests.dependOn(&run_cli_integration_test.step);
+
+    // Set up dependencies for integration tests (always needed)
+    cli_integration_tests.step.dependOn(&zkvm_host_cmd.step);
 }
 
 fn build_rust_project(b: *Builder, path: []const u8) *Builder.Step.Run {
