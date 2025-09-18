@@ -371,15 +371,13 @@ pub fn build(b: *Builder) !void {
     // Create the CLI installation step (reference to existing installation)
     const install_cli = b.addInstallArtifact(cli_exe, .{});
 
-    // Create simtest step that runs all tests (unit + integration)
-    const simtests = b.step("simtest", "Run all tests including integration tests");
+    // Create simtest step that runs only integration tests
+    const simtests = b.step("simtest", "Run integration tests");
     const run_cli_integration_test = b.addRunArtifact(cli_integration_tests);
 
     // Ensure CLI is built and installed before integration tests run
     simtests.dependOn(&install_cli.step);
-    // Run all unit tests first
-    simtests.dependOn(test_step);
-    // Then run integration tests
+    // Run integration tests only
     simtests.dependOn(&run_cli_integration_test.step);
 
     // Set up dependencies for integration tests (always needed)
