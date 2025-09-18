@@ -75,8 +75,11 @@ jobs:
       with:
         version: 0.14.1
 
-    - name: Run all tests
-      run: zig build simtest --summary all
+    - name: Run all unit tests
+      run: zig build test --summary all
+
+    - name: Run all sim tests
+      run: zig build simtests --summary all
 
   docker-build:
     name: docker-build
