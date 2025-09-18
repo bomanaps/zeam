@@ -79,7 +79,7 @@ jobs:
       run: zig build test --summary all
 
     - name: Run all sim tests
-      run: zig build simtests --summary all
+      run: zig build simtest --summary all
 
   docker-build:
     name: docker-build
