@@ -255,34 +255,12 @@ pub fn build(b: *Builder) !void {
         .optimize = optimize,
         .target = target,
     });
-    // Add all the same dependencies as the main CLI executable
-    cli_integration_tests.root_module.addImport("@zeam/network", zeam_network);
 
-    // Create build options for integration tests with CLI executable path
     const integration_build_options = b.addOptions();
-    const cli_exe_path = b.fmt("{s}/bin/zeam", .{b.install_path});
-    integration_build_options.addOption([]const u8, "cli_exe_path", cli_exe_path);
+    cli_integration_tests.step.dependOn(&cli_exe.step);
+    integration_build_options.addOptionPath("cli_exe_path", cli_exe.getEmittedBin());
     const integration_build_options_module = integration_build_options.createModule();
     cli_integration_tests.root_module.addImport("build_options", integration_build_options_module);
-
-    // Add ethlibp2p exports for Rust linking
-    const ethlibp2p_exports = b.addObject(.{
-        .name = "ethlibp2p_exports",
-        .root_source_file = b.path("pkgs/network/src/ethlibp2p.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    ethlibp2p_exports.root_module.addImport("@zeam/types", zeam_types);
-    ethlibp2p_exports.root_module.addImport("@zeam/utils", zeam_utils);
-    ethlibp2p_exports.root_module.addImport("@zeam/params", zeam_params);
-    ethlibp2p_exports.root_module.addImport("ssz", ssz);
-    ethlibp2p_exports.root_module.addImport("xev", xev);
-    ethlibp2p_exports.root_module.addImport("multiformats", multiformats);
-    cli_integration_tests.addObject(ethlibp2p_exports);
-
-    addRustGlueLib(b, cli_integration_tests, target);
-    cli_integration_tests.linkLibC(); // for rust static libs to link
-    cli_integration_tests.linkSystemLibrary("unwind"); // to be able to display rust backtraces
 
     const types_tests = b.addTest(.{
         .root_module = zeam_types,
@@ -368,20 +346,10 @@ pub fn build(b: *Builder) !void {
 
     test_step.dependOn(tools_test_step);
 
-    // Create the CLI installation step (reference to existing installation)
-    const install_cli = b.addInstallArtifact(cli_exe, .{});
-
     // Create simtest step that runs only integration tests
     const simtests = b.step("simtest", "Run integration tests");
     const run_cli_integration_test = b.addRunArtifact(cli_integration_tests);
-
-    // Ensure CLI is built and installed before integration tests run
-    simtests.dependOn(&install_cli.step);
-    // Run integration tests only
     simtests.dependOn(&run_cli_integration_test.step);
-
-    // Set up dependencies for integration tests (always needed)
-    cli_integration_tests.step.dependOn(&zkvm_host_cmd.step);
 }
 
 fn build_rust_project(b: *Builder, path: []const u8) *Builder.Step.Run {
