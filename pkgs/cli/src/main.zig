@@ -517,3 +517,7 @@ fn mainInner() !void {
 test {
     @import("std").testing.refAllDeclsRecursive(@This());
 }
+
+test {
+    _ = @import("test/genesis_to_finalization_test.zig");
+}
