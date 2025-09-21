@@ -4,9 +4,59 @@ const net = std.net;
 const build_options = @import("build_options");
 const constants = @import("cli_constants");
 
-/// Helper function to wait for a beam simulation node to start up and be ready
-/// Returns true if server is ready, false if timeout occurred
-fn spinBeamSimNode(cli_process: *process.Child) !bool {
+/// Verify that the Zeam executable exists and return its path
+/// Includes detailed debugging output if the executable is not found
+fn getZeamExecutable() ![]const u8 {
+    const exe_file = std.fs.openFileAbsolute(build_options.cli_exe_path, .{}) catch |err| {
+        std.debug.print("ERROR: Cannot find executable at {s}: {}\n", .{ build_options.cli_exe_path, err });
+
+        // Try to list the directory to see what's actually there
+        std.debug.print("INFO: Attempting to list zig-out/bin directory...\n", .{});
+        const dir_path = std.fs.path.dirname(build_options.cli_exe_path);
+        if (dir_path) |path| {
+            var dir = std.fs.openDirAbsolute(path, .{ .iterate = true }) catch |dir_err| {
+                std.debug.print("ERROR: Cannot open directory {s}: {}\n", .{ path, dir_err });
+                return err;
+            };
+            defer dir.close();
+
+            var iterator = dir.iterate();
+            std.debug.print("INFO: Contents of {s}:\n", .{path});
+            while (try iterator.next()) |entry| {
+                std.debug.print("  - {s} (type: {})\n", .{ entry.name, entry.kind });
+            }
+        }
+
+        return err;
+    };
+    exe_file.close();
+    std.debug.print("INFO: Found executable at {s}\n", .{build_options.cli_exe_path});
+    return build_options.cli_exe_path;
+}
+
+/// Helper function to start a beam simulation node and wait for it to be ready
+/// Handles the complete process lifecycle: creation, spawning, and waiting for readiness
+/// Returns the process handle for cleanup, or error if startup fails
+fn spinBeamSimNode(allocator: std.mem.Allocator, exe_path: []const u8) !*process.Child {
+    // Set up process with beam command and mock network
+    const args = [_][]const u8{ exe_path, "beam", "--mockNetwork", "true" };
+    const cli_process = try allocator.create(process.Child);
+    cli_process.* = process.Child.init(&args, allocator);
+
+    // Capture stdout and stderr for debugging
+    cli_process.stdout_behavior = .Pipe;
+    cli_process.stderr_behavior = .Pipe;
+
+    // Start the process
+    cli_process.spawn() catch |err| {
+        std.debug.print("ERROR: Failed to spawn process: {}\n", .{err});
+        allocator.destroy(cli_process);
+        return err;
+    };
+
+    std.debug.print("INFO: Process spawned successfully with PID\n", .{});
+
+    // Wait for server to be ready
     const start_time = std.time.milliTimestamp();
     var server_ready = false;
     var retry_count: u32 = 0;
@@ -74,88 +124,95 @@ fn spinBeamSimNode(cli_process: *process.Child) !bool {
         } else {
             std.debug.print("INFO: Process is still running\n", .{});
         }
+
+        // Server not ready, cleanup and return error
+        allocator.destroy(cli_process);
+        return error.ServerStartupTimeout;
     }
 
-    return server_ready;
+    return cli_process;
+}
+
+/// Wait for node to start and be ready for activity
+/// TODO: Over time, this can be abstracted to listen for some event
+/// that the node can output when being active, rather than using a fixed sleep
+fn waitForNodeStart() void {
+    std.time.sleep(2000 * std.time.ns_per_ms);
+}
+
+/// Helper struct for making HTTP requests to Zeam endpoints
+const ZeamRequest = struct {
+    allocator: std.mem.Allocator,
+
+    fn init(allocator: std.mem.Allocator) ZeamRequest {
+        return ZeamRequest{ .allocator = allocator };
+    }
+
+    /// Make a request to the /metrics endpoint and return the response
+    fn getMetrics(self: ZeamRequest) ![]u8 {
+        return self.makeRequest("/metrics");
+    }
+
+    /// Make a request to the /health endpoint and return the response
+    fn getHealth(self: ZeamRequest) ![]u8 {
+        return self.makeRequest("/health");
+    }
+
+    /// Internal helper to make HTTP requests to any endpoint
+    fn makeRequest(self: ZeamRequest, endpoint: []const u8) ![]u8 {
+        // Create connection to the server
+        const address = try net.Address.parseIp4(constants.DEFAULT_SERVER_IP, constants.DEFAULT_METRICS_PORT);
+        var connection = try net.tcpConnectToAddress(address);
+        defer connection.close();
+
+        // Create HTTP request
+        var request_buffer: [4096]u8 = undefined;
+        const request = try std.fmt.bufPrint(&request_buffer, "GET {s} HTTP/1.1\r\n" ++
+            "Host: {s}:{d}\r\n" ++
+            "Connection: close\r\n" ++
+            "\r\n", .{ endpoint, constants.DEFAULT_SERVER_IP, constants.DEFAULT_METRICS_PORT });
+
+        try connection.writeAll(request);
+
+        // Read response
+        var response_buffer: [8192]u8 = undefined;
+        const bytes_read = try connection.readAll(&response_buffer);
+
+        // Allocate and return a copy of the response
+        const response = try self.allocator.dupe(u8, response_buffer[0..bytes_read]);
+        return response;
+    }
+
+    /// Free a response returned by getMetrics() or getHealth()
+    fn freeResponse(self: ZeamRequest, response: []u8) void {
+        self.allocator.free(response);
+    }
+};
+
+/// Clean up a process created by spinBeamSimNode
+fn cleanupProcess(allocator: std.mem.Allocator, cli_process: *process.Child) void {
+    _ = cli_process.kill() catch {};
+    _ = cli_process.wait() catch {};
+    allocator.destroy(cli_process);
 }
 
 test "CLI beam command with mock network - complete integration test" {
     const allocator = std.testing.allocator;
 
-    // Verify executable exists first
-    const exe_file = std.fs.openFileAbsolute(build_options.cli_exe_path, .{}) catch |err| {
-        std.debug.print("ERROR: Cannot find executable at {s}: {}\n", .{ build_options.cli_exe_path, err });
+    // Get executable path
+    const exe_path = try getZeamExecutable();
 
-        // Try to list the directory to see what's actually there
-        std.debug.print("INFO: Attempting to list zig-out/bin directory...\n", .{});
-        const dir_path = std.fs.path.dirname(build_options.cli_exe_path);
-        if (dir_path) |path| {
-            var dir = std.fs.openDirAbsolute(path, .{ .iterate = true }) catch |dir_err| {
-                std.debug.print("ERROR: Cannot open directory {s}: {}\n", .{ path, dir_err });
-                return err;
-            };
-            defer dir.close();
+    // Start node and wait for readiness
+    const cli_process = try spinBeamSimNode(allocator, exe_path);
+    defer cleanupProcess(allocator, cli_process);
 
-            var iterator = dir.iterate();
-            std.debug.print("INFO: Contents of {s}:\n", .{path});
-            while (try iterator.next()) |entry| {
-                std.debug.print("  - {s} (type: {})\n", .{ entry.name, entry.kind });
-            }
-        }
+    // Wait for node to be fully active
+    waitForNodeStart();
 
-        return err;
-    };
-    exe_file.close();
-    std.debug.print("INFO: Found executable at {s}\n", .{build_options.cli_exe_path});
-
-    // Start CLI with beam command and mock network - use build option for executable path
-    const args = [_][]const u8{ build_options.cli_exe_path, "beam", "--mockNetwork", "true" };
-    var cli_process = process.Child.init(&args, allocator);
-
-    // Capture stdout and stderr for debugging
-    cli_process.stdout_behavior = .Pipe;
-    cli_process.stderr_behavior = .Pipe;
-
-    defer {
-        _ = cli_process.kill() catch {};
-        _ = cli_process.wait() catch {};
-    }
-
-    // Start the process
-    cli_process.spawn() catch |err| {
-        std.debug.print("ERROR: Failed to spawn process: {}\n", .{err});
-        return err;
-    };
-
-    std.debug.print("INFO: Process spawned successfully with PID\n", .{});
-
-    // Wait for metrics server to be ready using helper function
-    const server_ready = try spinBeamSimNode(&cli_process);
-
-    // Verify server started successfully
-    try std.testing.expect(server_ready);
-
-    // Let the node run for a bit to generate some activity
-    std.time.sleep(2000 * std.time.ns_per_ms);
-
-    // Make HTTP request to metrics endpoint
-    const address = try net.Address.parseIp4(constants.DEFAULT_SERVER_IP, constants.DEFAULT_METRICS_PORT);
-    var connection = try net.tcpConnectToAddress(address);
-    defer connection.close();
-
-    // Create HTTP request using constants
-    var request_buffer: [4096]u8 = undefined;
-    const request = try std.fmt.bufPrint(&request_buffer, "GET /metrics HTTP/1.1\r\n" ++
-        "Host: {s}:{d}\r\n" ++
-        "Connection: close\r\n" ++
-        "\r\n", .{ constants.DEFAULT_SERVER_IP, constants.DEFAULT_METRICS_PORT });
-
-    try connection.writeAll(request);
-
-    // Read response
-    var response_buffer: [8192]u8 = undefined;
-    const bytes_read = try connection.readAll(&response_buffer);
-    const response = response_buffer[0..bytes_read];
+    // Test metrics endpoint
+    var zeam_request = ZeamRequest.init(allocator);
+    const response = try zeam_request.getMetrics();
+    defer zeam_request.freeResponse(response);
 
     // Verify we got a valid HTTP response
     try std.testing.expect(std.mem.indexOf(u8, response, "HTTP/1.1 200") != null or std.mem.indexOf(u8, response, "HTTP/1.0 200") != null);
