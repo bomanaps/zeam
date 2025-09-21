@@ -15,7 +15,7 @@ pub const ValidatorParams = struct {
     ids: []usize,
     chain: *chains.BeamChain,
     network: networkFactory.Network,
-    logger: *zeam_utils.ZeamLogger,
+    logger: zeam_utils.ModuleLogger,
 };
 
 pub const BeamValidator = struct {
@@ -24,7 +24,7 @@ pub const BeamValidator = struct {
     chain: *chains.BeamChain,
     network: networkFactory.Network,
     ids: []usize,
-    logger: *const zeam_utils.ZeamLogger,
+    logger: zeam_utils.ModuleLogger,
 
     const Self = @This();
     pub fn init(allocator: Allocator, config: configs.ChainConfig, opts: ValidatorParams) Self {
@@ -88,7 +88,7 @@ pub const BeamValidator = struct {
             };
 
             const signed_vote_message = networks.GossipMessage{ .vote = signed_vote };
-            self.logger.info("validator constructed vote slot={d} vote={any}", .{ slot, signed_vote_message });
+            self.logger.info("validator constructed vote slot={d} vote={any}", .{ slot, signed_vote_message.vote.message });
             try self.chain.publishVote(signed_vote);
             // move gossip message construction and publish to publishVote
             try self.network.publish(&signed_vote_message);

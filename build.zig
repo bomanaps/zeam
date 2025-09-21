@@ -331,6 +331,26 @@ pub fn build(b: *Builder) !void {
     const run_network_tests = b.addRunArtifact(network_tests);
     test_step.dependOn(&run_network_tests.step);
 
+    const configs_tests = b.addTest(.{
+        .root_module = zeam_configs,
+        .optimize = optimize,
+        .target = target,
+    });
+    configs_tests.root_module.addImport("@zeam/utils", zeam_utils);
+    configs_tests.root_module.addImport("@zeam/types", zeam_types);
+    configs_tests.root_module.addImport("@zeam/params", zeam_params);
+    configs_tests.root_module.addImport("yaml", yaml);
+    const run_configs_tests = b.addRunArtifact(configs_tests);
+    test_step.dependOn(&run_configs_tests.step);
+
+    const utils_tests = b.addTest(.{
+        .root_module = zeam_utils,
+        .optimize = optimize,
+        .target = target,
+    });
+    const run_utils_tests = b.addRunArtifact(utils_tests);
+    test_step.dependOn(&run_utils_tests.step);
+
     manager_tests.step.dependOn(&zkvm_host_cmd.step);
     cli_tests.step.dependOn(&zkvm_host_cmd.step);
 
@@ -391,6 +411,7 @@ fn build_zkvm_targets(b: *Builder, main_exe: *Builder.Step, host_target: std.Bui
             .optimize = optimize,
             .root_source_file = b.path("pkgs/types/src/lib.zig"),
         });
+        zeam_types.addImport("ssz", ssz);
         zeam_types.addImport("@zeam/params", zeam_params);
 
         // add zeam-params
