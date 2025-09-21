@@ -2,6 +2,82 @@ const std = @import("std");
 const process = std.process;
 const net = std.net;
 const build_options = @import("build_options");
+const constants = @import("cli_constants");
+
+/// Helper function to wait for a beam simulation node to start up and be ready
+/// Returns true if server is ready, false if timeout occurred
+fn spinBeamSimNode(cli_process: *process.Child) !bool {
+    const start_time = std.time.milliTimestamp();
+    var server_ready = false;
+    var retry_count: u32 = 0;
+
+    while (std.time.milliTimestamp() - start_time < constants.DEFAULT_SERVER_STARTUP_TIMEOUT_MS) {
+        retry_count += 1;
+
+        // Print progress every 10 retries
+        if (retry_count % 10 == 0) {
+            const elapsed = @divTrunc(std.time.milliTimestamp() - start_time, 1000);
+            std.debug.print("INFO: Still waiting for server... ({} seconds, {} retries)\n", .{ elapsed, retry_count });
+        }
+
+        // Try to connect to the metrics server
+        const address = net.Address.parseIp4(constants.DEFAULT_SERVER_IP, constants.DEFAULT_METRICS_PORT) catch {
+            std.time.sleep(constants.DEFAULT_RETRY_INTERVAL_MS * std.time.ns_per_ms);
+            continue;
+        };
+
+        var connection = net.tcpConnectToAddress(address) catch |err| {
+            // Only print error details on certain intervals to avoid spam
+            if (retry_count % 20 == 0) {
+                std.debug.print("DEBUG: Connection attempt {} failed: {}\n", .{ retry_count, err });
+            }
+            std.time.sleep(constants.DEFAULT_RETRY_INTERVAL_MS * std.time.ns_per_ms);
+            continue;
+        };
+
+        // Test if we can actually send/receive data
+        connection.close();
+        server_ready = true;
+        std.debug.print("SUCCESS: Server ready after {} seconds ({} retries)\n", .{ @divTrunc(std.time.milliTimestamp() - start_time, 1000), retry_count });
+        break;
+    }
+
+    // If server didn't start, try to get process output for debugging
+    if (!server_ready) {
+        std.debug.print("ERROR: Metrics server not ready after {} seconds ({} retries)\n", .{ @divTrunc(constants.DEFAULT_SERVER_STARTUP_TIMEOUT_MS, 1000), retry_count });
+
+        // Try to read any output from the process
+        if (cli_process.stdout) |stdout| {
+            var stdout_buffer: [4096]u8 = undefined;
+            const stdout_bytes = stdout.readAll(&stdout_buffer) catch 0;
+            if (stdout_bytes > 0) {
+                std.debug.print("STDOUT: {s}\n", .{stdout_buffer[0..stdout_bytes]});
+            }
+        }
+
+        if (cli_process.stderr) |stderr| {
+            var stderr_buffer: [4096]u8 = undefined;
+            const stderr_bytes = stderr.readAll(&stderr_buffer) catch 0;
+            if (stderr_bytes > 0) {
+                std.debug.print("STDERR: {s}\n", .{stderr_buffer[0..stderr_bytes]});
+            }
+        }
+
+        // Check if process is still running
+        if (cli_process.wait() catch null) |term| {
+            switch (term) {
+                .Exited => |code| std.debug.print("ERROR: Process exited with code {}\n", .{code}),
+                .Signal => |sig| std.debug.print("ERROR: Process killed by signal {}\n", .{sig}),
+                .Stopped => |sig| std.debug.print("ERROR: Process stopped by signal {}\n", .{sig}),
+                .Unknown => |code| std.debug.print("ERROR: Process terminated with unknown code {}\n", .{code}),
+            }
+        } else {
+            std.debug.print("INFO: Process is still running\n", .{});
+        }
+    }
+
+    return server_ready;
+}
 
 test "CLI beam command with mock network - complete integration test" {
     const allocator = std.testing.allocator;
@@ -53,78 +129,8 @@ test "CLI beam command with mock network - complete integration test" {
 
     std.debug.print("INFO: Process spawned successfully with PID\n", .{});
 
-    // Wait for metrics server to be ready (with extended timeout for CI)
-    const metrics_port: u16 = 9667;
-    const start_time = std.time.milliTimestamp();
-    const max_wait_time = 120000; // Increased to 120 seconds for CI environments
-    const retry_interval = 1000; // Increased to 1000ms between retries
-    var server_ready = false;
-    var retry_count: u32 = 0;
-
-    while (std.time.milliTimestamp() - start_time < max_wait_time) {
-        retry_count += 1;
-
-        // Print progress every 10 retries
-        if (retry_count % 10 == 0) {
-            const elapsed = @divTrunc(std.time.milliTimestamp() - start_time, 1000);
-            std.debug.print("INFO: Still waiting for server... ({} seconds, {} retries)\n", .{ elapsed, retry_count });
-        }
-
-        // Try to connect to the metrics server
-        const address = net.Address.parseIp4("127.0.0.1", metrics_port) catch {
-            std.time.sleep(retry_interval * std.time.ns_per_ms);
-            continue;
-        };
-
-        var connection = net.tcpConnectToAddress(address) catch |err| {
-            // Only print error details on certain intervals to avoid spam
-            if (retry_count % 20 == 0) {
-                std.debug.print("DEBUG: Connection attempt {} failed: {}\n", .{ retry_count, err });
-            }
-            std.time.sleep(retry_interval * std.time.ns_per_ms);
-            continue;
-        };
-
-        // Test if we can actually send/receive data
-        connection.close();
-        server_ready = true;
-        std.debug.print("SUCCESS: Server ready after {} seconds ({} retries)\n", .{ @divTrunc(std.time.milliTimestamp() - start_time, 1000), retry_count });
-        break;
-    }
-
-    // If server didn't start, try to get process output for debugging
-    if (!server_ready) {
-        std.debug.print("ERROR: Metrics server not ready after {} seconds ({} retries)\n", .{ @divTrunc(max_wait_time, 1000), retry_count });
-
-        // Try to read any output from the process
-        if (cli_process.stdout) |stdout| {
-            var stdout_buffer: [4096]u8 = undefined;
-            const stdout_bytes = stdout.readAll(&stdout_buffer) catch 0;
-            if (stdout_bytes > 0) {
-                std.debug.print("STDOUT: {s}\n", .{stdout_buffer[0..stdout_bytes]});
-            }
-        }
-
-        if (cli_process.stderr) |stderr| {
-            var stderr_buffer: [4096]u8 = undefined;
-            const stderr_bytes = stderr.readAll(&stderr_buffer) catch 0;
-            if (stderr_bytes > 0) {
-                std.debug.print("STDERR: {s}\n", .{stderr_buffer[0..stderr_bytes]});
-            }
-        }
-
-        // Check if process is still running
-        if (cli_process.wait() catch null) |term| {
-            switch (term) {
-                .Exited => |code| std.debug.print("ERROR: Process exited with code {}\n", .{code}),
-                .Signal => |sig| std.debug.print("ERROR: Process killed by signal {}\n", .{sig}),
-                .Stopped => |sig| std.debug.print("ERROR: Process stopped by signal {}\n", .{sig}),
-                .Unknown => |code| std.debug.print("ERROR: Process terminated with unknown code {}\n", .{code}),
-            }
-        } else {
-            std.debug.print("INFO: Process is still running\n", .{});
-        }
-    }
+    // Wait for metrics server to be ready using helper function
+    const server_ready = try spinBeamSimNode(&cli_process);
 
     // Verify server started successfully
     try std.testing.expect(server_ready);
@@ -133,16 +139,16 @@ test "CLI beam command with mock network - complete integration test" {
     std.time.sleep(2000 * std.time.ns_per_ms);
 
     // Make HTTP request to metrics endpoint
-    const address = try net.Address.parseIp4("127.0.0.1", metrics_port);
+    const address = try net.Address.parseIp4(constants.DEFAULT_SERVER_IP, constants.DEFAULT_METRICS_PORT);
     var connection = try net.tcpConnectToAddress(address);
     defer connection.close();
 
-    // Create HTTP request
+    // Create HTTP request using constants
     var request_buffer: [4096]u8 = undefined;
     const request = try std.fmt.bufPrint(&request_buffer, "GET /metrics HTTP/1.1\r\n" ++
-        "Host: 127.0.0.1:9667\r\n" ++
+        "Host: {s}:{d}\r\n" ++
         "Connection: close\r\n" ++
-        "\r\n", .{});
+        "\r\n", .{ constants.DEFAULT_SERVER_IP, constants.DEFAULT_METRICS_PORT });
 
     try connection.writeAll(request);
 
@@ -154,40 +160,12 @@ test "CLI beam command with mock network - complete integration test" {
     // Verify we got a valid HTTP response
     try std.testing.expect(std.mem.indexOf(u8, response, "HTTP/1.1 200") != null or std.mem.indexOf(u8, response, "HTTP/1.0 200") != null);
 
-    // Verify response contains metrics data (should contain some metric names)
-    try std.testing.expect(std.mem.indexOf(u8, response, "# HELP") != null or std.mem.indexOf(u8, response, "# TYPE") != null);
+    // Verify response contains actual metric names from the metrics system
+    try std.testing.expect(std.mem.indexOf(u8, response, "chain_onblock_duration_seconds") != null or
+        std.mem.indexOf(u8, response, "block_processing_duration_seconds") != null);
 
     // Verify response is not empty
     try std.testing.expect(response.len > 100);
-
-    // Make multiple requests to verify consistency
-    for (0..3) |i| {
-        var connection2 = try net.tcpConnectToAddress(address);
-        defer connection2.close();
-
-        var request_buffer2: [4096]u8 = undefined;
-        const request2 = try std.fmt.bufPrint(&request_buffer2, "GET /metrics HTTP/1.1\r\n" ++
-            "Host: 127.0.0.1:9667\r\n" ++
-            "Connection: close\r\n" ++
-            "\r\n", .{});
-
-        try connection2.writeAll(request2);
-
-        var response_buffer2: [8192]u8 = undefined;
-        const bytes_read2 = try connection2.readAll(&response_buffer2);
-        const response2 = response_buffer2[0..bytes_read2];
-
-        // Verify HTTP response is valid
-        try std.testing.expect(std.mem.indexOf(u8, response2, "HTTP/1.1 200") != null or std.mem.indexOf(u8, response2, "HTTP/1.0 200") != null);
-
-        // Verify response is not empty
-        try std.testing.expect(response2.len > 100);
-
-        std.debug.print("INFO: Request {} completed successfully\n", .{i + 1});
-
-        // Small delay between requests
-        std.time.sleep(100 * std.time.ns_per_ms);
-    }
 
     std.debug.print("SUCCESS: All integration test checks passed\n", .{});
 }

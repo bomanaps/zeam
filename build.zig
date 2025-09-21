@@ -262,6 +262,14 @@ pub fn build(b: *Builder) !void {
     const integration_build_options_module = integration_build_options.createModule();
     cli_integration_tests.root_module.addImport("build_options", integration_build_options_module);
 
+    // Add CLI constants module to integration tests
+    const cli_constants = b.addModule("cli_constants", .{
+        .root_source_file = b.path("pkgs/cli/src/constants.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cli_integration_tests.root_module.addImport("cli_constants", cli_constants);
+
     const types_tests = b.addTest(.{
         .root_module = zeam_types,
         .optimize = optimize,

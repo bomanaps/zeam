@@ -1,6 +1,7 @@
 const std = @import("std");
 const json = std.json;
 const build_options = @import("build_options");
+const constants = @import("constants.zig");
 
 const simargs = @import("simargs");
 
@@ -35,7 +36,7 @@ pub const NodeCommand = struct {
     custom_genesis: []const u8,
     node_id: u32 = 0,
     metrics_enable: bool = false,
-    metrics_port: u16 = 9667,
+    metrics_port: u16 = constants.DEFAULT_METRICS_PORT,
     override_genesis_time: ?u64,
     network_dir: []const u8 = "./network",
 
@@ -74,7 +75,7 @@ const ZeamArgs = struct {
         beam: struct {
             help: bool = false,
             mockNetwork: bool = false,
-            metricsPort: u16 = 9667,
+            metricsPort: u16 = constants.DEFAULT_METRICS_PORT,
         },
         prove: struct {
             dist_dir: []const u8 = "zig-out/bin",
@@ -95,7 +96,7 @@ const ZeamArgs = struct {
 
             __commands__: union(enum) {
                 genconfig: struct {
-                    metrics_port: u16 = 9667,
+                    metrics_port: u16 = constants.DEFAULT_METRICS_PORT,
                     filename: []const u8 = "prometheus.yml",
                     help: bool = false,
 
