@@ -11,7 +11,7 @@ fn getZeamExecutable() ![]const u8 {
         std.debug.print("ERROR: Cannot find executable at {s}: {}\n", .{ build_options.cli_exe_path, err });
 
         // Try to list the directory to see what's actually there
-        std.debug.print("INFO: Attempting to list zig-out/bin directory...\n", .{});
+        std.debug.print("INFO: Attempting to list {s} directory...\n", .{build_options.cli_exe_path});
         const dir_path = std.fs.path.dirname(build_options.cli_exe_path);
         if (dir_path) |path| {
             var dir = std.fs.openDirAbsolute(path, .{ .iterate = true }) catch |dir_err| {
