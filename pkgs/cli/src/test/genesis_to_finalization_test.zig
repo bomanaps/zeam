@@ -4,7 +4,6 @@ const node_lib = @import("@zeam/node");
 const BeamNode = node_lib.BeamNode;
 const Clock = node_lib.Clock;
 const utils_lib = @import("@zeam/utils");
-const Logger = utils_lib.ZeamLogger;
 const node = @import("../node.zig");
 const Node = node.Node;
 const NodeOptions = node.NodeOptions;
@@ -137,7 +136,7 @@ const TestNode = struct {
         chain_options.num_validators = options.genesis_spec.num_validators;
         const chain_config = try configs.ChainConfig.init(configs.Chain.custom, chain_options);
         var anchorState = try sft.genGenesisState(allocator, chain_config.genesis);
-        errdefer anchorState.deinit(allocator);
+        errdefer anchorState.deinit();
 
         // Create event loop
         var loop = try xev.Loop.init(.{});
@@ -178,7 +177,7 @@ const TestNode = struct {
         const connect_peers = try connect_peer_list.toOwnedSlice(allocator);
 
         // Initialize network
-        var network = try networks.EthLibp2p.init(allocator, &loop, .{ .networkId = 0, .listen_addresses = listen_addresses, .connect_peers = connect_peers, .local_private_key = options.local_priv_key }, options.logger);
+        var network = try networks.EthLibp2p.init(allocator, &loop, .{ .networkId = 0, .listen_addresses = listen_addresses, .connect_peers = connect_peers, .local_private_key = options.local_priv_key }, options.logger_config.logger(.network));
         errdefer network.deinit();
 
         // Initialize clock
@@ -189,12 +188,12 @@ const TestNode = struct {
         const beam_node = try BeamNode.init(allocator, .{
             .nodeId = options.node_id,
             .config = chain_config,
-            .anchorState = anchorState,
+            .anchorState = &anchorState,
             .backend = network.getNetworkInterface(),
             .clock = &clock,
             .db = .{},
             .validator_ids = options.validator_indices,
-            .logger = options.logger,
+            .logger_config = options.logger_config,
         });
 
         return Self{
@@ -243,9 +242,9 @@ const TestNode = struct {
 fn runTwoNodesInProcessToFinalization(allocator: Allocator, config: TestConfig) !FinalizationResult {
     std.debug.print("🔄 Starting two nodes in-process to finalization using TestNode wrapper approach...\n", .{});
 
-    // Create loggers for both nodes
-    var logger1 = utils_lib.getLogger(.debug, utils_lib.FileBehaviourParams{ .fileActiveLevel = .debug, .filePath = "./log", .fileName = "zeam_0" });
-    var logger2 = utils_lib.getLogger(.debug, utils_lib.FileBehaviourParams{ .fileActiveLevel = .debug, .filePath = "./log", .fileName = "zeam_1" });
+    // Create logger configs for both nodes
+    var logger_config1 = utils_lib.getLoggerConfig(.debug, utils_lib.FileBehaviourParams{ .fileActiveLevel = .debug, .filePath = "./log", .fileName = "zeam_0" });
+    var logger_config2 = utils_lib.getLoggerConfig(.debug, utils_lib.FileBehaviourParams{ .fileActiveLevel = .debug, .filePath = "./log", .fileName = "zeam_1" });
 
     // Create NodeCommand configurations for both nodes (like CLI args)
     const node_cmd_0 = NodeCommand{
@@ -277,7 +276,7 @@ fn runTwoNodesInProcessToFinalization(allocator: Allocator, config: TestConfig) 
         .genesis_spec = undefined,
         .validator_indices = undefined,
         .local_priv_key = undefined,
-        .logger = &logger1,
+        .logger_config = &logger_config1,
     };
     defer start_options_0.deinit(allocator);
 
@@ -289,7 +288,7 @@ fn runTwoNodesInProcessToFinalization(allocator: Allocator, config: TestConfig) 
         .genesis_spec = undefined,
         .validator_indices = undefined,
         .local_priv_key = undefined,
-        .logger = &logger2,
+        .logger_config = &logger_config2,
     };
     defer start_options_1.deinit(allocator);
 
