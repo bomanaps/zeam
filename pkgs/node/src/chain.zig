@@ -8,8 +8,8 @@ const stf = @import("@zeam/state-transition");
 const ssz = @import("ssz");
 const networks = @import("@zeam/network");
 const params = @import("@zeam/params");
-const metrics = @import("@zeam/metrics");
-const event_broadcaster = metrics.event_broadcaster;
+const api = @import("@zeam/api");
+const event_broadcaster = api.event_broadcaster;
 
 const zeam_utils = @import("@zeam/utils");
 
@@ -309,7 +309,7 @@ pub const BeamChain = struct {
     //
     // TODO: move self.states cache to pointer of states along with blockInfo's poststate
     fn onBlock(self: *Self, signedBlock: types.SignedBeamBlock, blockInfo: CachedProcessedBlockInfo) !void {
-        const onblock_timer = metrics.chain_onblock_duration_seconds.start();
+        const onblock_timer = api.chain_onblock_duration_seconds.start();
 
         const block = signedBlock.message;
         const block_root: types.Root = blockInfo.blockRoot orelse computedroot: {
@@ -364,15 +364,15 @@ pub const BeamChain = struct {
         const processing_time = onblock_timer.observe();
 
         // 6. Emit new head event via SSE
-        const metrics_proto_block = metrics.events.ProtoBlock{
+        const metrics_proto_block = api.events.ProtoBlock{
             .slot = new_head.slot,
             .blockRoot = new_head.blockRoot,
             .parentRoot = new_head.parentRoot,
             .stateRoot = new_head.stateRoot,
             .timeliness = new_head.timeliness,
         };
-        if (metrics.events.NewHeadEvent.fromProtoBlock(self.allocator, metrics_proto_block)) |head_event| {
-            var chain_event = metrics.events.ChainEvent{ .new_head = head_event };
+        if (api.events.NewHeadEvent.fromProtoBlock(self.allocator, metrics_proto_block)) |head_event| {
+            var chain_event = api.events.ChainEvent{ .new_head = head_event };
             event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
                 self.module_logger.warn("Failed to broadcast head event: {any}", .{err});
                 chain_event.deinit(self.allocator);

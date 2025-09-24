@@ -246,10 +246,10 @@ fn process_attestations(allocator: Allocator, state: *types.BeamState, attestati
 
             // Emit new justification event via SSE (only in non-ZKVM contexts)
             if (!is_zkvm) {
-                const metrics_module = @import("@zeam/metrics");
-                if (metrics_module.events.NewJustificationEvent.fromCheckpoint(allocator, vote.target, state.slot)) |just_event| {
-                    var chain_event = metrics_module.events.ChainEvent{ .new_justification = just_event };
-                    metrics_module.event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
+                const api_module = @import("@zeam/api");
+                if (api_module.events.NewJustificationEvent.fromCheckpoint(allocator, vote.target, state.slot)) |just_event| {
+                    var chain_event = api_module.events.ChainEvent{ .new_justification = just_event };
+                    api_module.event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
                         logger.warn("Failed to broadcast justification event: {any}", .{err});
                         chain_event.deinit(allocator);
                     };
@@ -273,10 +273,10 @@ fn process_attestations(allocator: Allocator, state: *types.BeamState, attestati
 
                 // Emit new finalization event via SSE (only in non-ZKVM contexts)
                 if (!is_zkvm) {
-                    const metrics_module = @import("@zeam/metrics");
-                    if (metrics_module.events.NewFinalizationEvent.fromCheckpoint(allocator, vote.source, state.slot)) |final_event| {
-                        var chain_event = metrics_module.events.ChainEvent{ .new_finalization = final_event };
-                        metrics_module.event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
+                    const api_module = @import("@zeam/api");
+                    if (api_module.events.NewFinalizationEvent.fromCheckpoint(allocator, vote.source, state.slot)) |final_event| {
+                        var chain_event = api_module.events.ChainEvent{ .new_finalization = final_event };
+                        api_module.event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
                             logger.warn("Failed to broadcast finalization event: {any}", .{err});
                             chain_event.deinit(allocator);
                         };

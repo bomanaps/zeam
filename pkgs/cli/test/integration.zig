@@ -39,7 +39,7 @@ fn getZeamExecutable() ![]const u8 {
 /// Returns the process handle for cleanup, or error if startup fails
 fn spinBeamSimNode(allocator: std.mem.Allocator, exe_path: []const u8) !*process.Child {
     // Set up process with beam command and mock network
-    const args = [_][]const u8{ exe_path, "beam", "--mockNetwork", "true" };
+    const args = [_][]const u8{ exe_path, "beam", "--mockNetwork", "true", "--num_validators", "4" };
     const cli_process = try allocator.create(process.Child);
     cli_process.* = process.Child.init(&args, allocator);
 
@@ -328,9 +328,35 @@ test "SSE events integration test - wait for justification and finalization" {
 
     std.debug.print("INFO: Connected to SSE endpoint, waiting for events...\n", .{});
 
-    // Read events for a longer period to catch justification and finalization
-    const timeout_ms: u64 = 60000; // 60 seconds timeout
-    try sse_client.readEvents(timeout_ms);
+    // Read events until both justification and finalization are seen, or timeout
+    const timeout_ms: u64 = 120000; // 120 seconds timeout
+    const start_ns = std.time.nanoTimestamp();
+    const deadline_ns = start_ns + timeout_ms * std.time.ns_per_ms;
+    var got_justification = false;
+    var got_finalization = false;
+
+    // streaming loop
+    var buffer: [4096]u8 = undefined;
+    while (std.time.nanoTimestamp() < deadline_ns and !(got_justification and got_finalization)) {
+        const bytes_read = sse_client.connection.read(&buffer) catch |err| switch (err) {
+            error.WouldBlock => {
+                std.time.sleep(50 * std.time.ns_per_ms);
+                continue;
+            },
+            else => return err,
+        };
+        if (bytes_read == 0) {
+            std.time.sleep(50 * std.time.ns_per_ms);
+            continue;
+        }
+        const chunk = try allocator.dupe(u8, buffer[0..bytes_read]);
+        defer allocator.free(chunk);
+        try sse_client.received_events.append(try allocator.dupe(u8, chunk));
+        if (std.mem.indexOf(u8, chunk, "event: new_justification") != null)
+            got_justification = true;
+        if (std.mem.indexOf(u8, chunk, "event: new_finalization") != null)
+            got_finalization = true;
+    }
 
     // Check if we received connection event
     try std.testing.expect(sse_client.hasEvent("connection"));
@@ -342,11 +368,9 @@ test "SSE events integration test - wait for justification and finalization" {
 
     std.debug.print("INFO: Received events - Head: {}, Justification: {}, Finalization: {}\n", .{ head_events, justification_events, finalization_events });
 
-    // Verify we received at least some events (the exact counts depend on the simulation)
-    // The test should pass if we get at least one of each type we're interested in
-    try std.testing.expect(head_events >= 0);
-    try std.testing.expect(justification_events >= 0);
-    try std.testing.expect(finalization_events >= 0);
+    // Require both justification and finalization events to have been observed
+    try std.testing.expect(got_justification);
+    try std.testing.expect(got_finalization);
 
     // Print some sample events for debugging
     for (sse_client.received_events.items, 0..) |event_data, i| {

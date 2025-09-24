@@ -1,9 +1,9 @@
 const std = @import("std");
-const metrics = @import("@zeam/metrics");
-const event_broadcaster = metrics.event_broadcaster;
+const api = @import("@zeam/api");
+const event_broadcaster = api.event_broadcaster;
 
 /// Simple metrics server that runs in a background thread
-pub fn startMetricsServer(allocator: std.mem.Allocator, port: u16) !void {
+pub fn startAPIServer(allocator: std.mem.Allocator, port: u16) !void {
     // Initialize the global event broadcaster
     try event_broadcaster.initGlobalBroadcaster(allocator);
 
@@ -44,7 +44,7 @@ fn handleConnection(connection: std.net.Server.Connection, allocator: std.mem.Al
         var metrics_output = std.ArrayList(u8).init(allocator);
         defer metrics_output.deinit();
 
-        metrics.writeMetrics(metrics_output.writer()) catch {
+        api.writeMetrics(metrics_output.writer()) catch {
             _ = request.respond("Internal Server Error\n", .{}) catch {};
             return;
         };
