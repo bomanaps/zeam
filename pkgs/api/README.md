@@ -12,7 +12,7 @@ The primary components are:
 - Core API surface implemented in `src/lib.zig` (`@zeam/api`)
 - Event system: `src/events.zig` and `src/event_broadcaster.zig`
 - The underlying Prometheus client library: [karlseguin/metrics.zig](https://github.com/karlseguin/metrics.zig)
-- A dedicated HTTP API server in `pkgs/cli/src/metrics_server.zig` (serves SSE, metrics, health)
+- A dedicated HTTP API server in `pkgs/cli/src/api_server.zig` (serves SSE, metrics, health)
 
 ## Metrics Exposed
 
@@ -41,7 +41,7 @@ The API system is initialized at application startup in `pkgs/cli/src/main.zig`.
 
 ## Architecture
 
-The API uses a dedicated HTTP server implementation (`pkgs/cli/src/metrics_server.zig`) that:
+The API uses a dedicated HTTP server implementation (`pkgs/cli/src/api_server.zig`) that:
 
 - Runs independently of the main application
 - Serves SSE at `/events`
@@ -66,25 +66,25 @@ The dashboards and monitoring infrastructure have been moved to a separate repos
 ### Quick Setup
 
 1. **Clone the dashboard repository**:
-   ```sh
-   git clone https://github.com/blockblaz/zeam-dashboards.git
-   cd zeam-dashboards
-   ```
+```sh
+git clone https://github.com/blockblaz/zeam-dashboards.git
+cd zeam-dashboards
+```
 
 2. **Generate Prometheus configuration**:
-   ```sh
-   # From your Zeam repository
-   ./zig-out/bin/zeam prometheus genconfig -f prometheus/prometheus.yml
-   ```
+```sh
+# From your Zeam repository
+./zig-out/bin/zeam prometheus genconfig -f prometheus/prometheus.yml
+```
 
 3. **Start the monitoring stack**:
-   ```sh
-   docker-compose up -d
-   ```
+```sh
+docker-compose up -d
+```
 
 4. **Access dashboards**:
-   - Grafana: http://localhost:3001 (admin/admin)
-   - Prometheus: http://localhost:9090
+- Grafana: http://localhost:3001 (admin/admin)
+- Prometheus: http://localhost:9090
 
 For detailed setup instructions and troubleshooting, see the [zeam-dashboards repository](https://github.com/blockblaz/zeam-dashboards).
 
@@ -94,9 +94,9 @@ For detailed setup instructions and troubleshooting, see the [zeam-dashboards re
 
 1.  **Check Prometheus Targets**: Open the Prometheus UI at [http://localhost:9090/targets](http://localhost:9090/targets). The `zeam_app` job should be **UP**.
 2.  **Build a Grafana Dashboard**: Create a new dashboard and panel. Use a query like the following to visualize the 95th percentile of block processing time:
-    ```promql
-    histogram_quantile(0.95, sum(rate(chain_onblock_duration_seconds_bucket[5m])) by (le))
-    ```
+```promql
+histogram_quantile(0.95, sum(rate(chain_onblock_duration_seconds_bucket[5m])) by (le))
+```
 
 ## CLI Commands
 
@@ -132,24 +132,24 @@ Generate a Prometheus configuration file that matches your metrics settings:
 You can test that the API server is working by:
 
 1. **Starting the beam node**:
-   ```sh
-   ./zig-out/bin/zeam beam --mockNetwork --metricsPort 9668
-   ```
+```sh
+./zig-out/bin/zeam beam --mockNetwork --metricsPort 9668
+```
 
 2. **Checking the SSE endpoint**:
-   ```sh
-   curl -N http://localhost:9668/events
-   ```
+```sh
+curl -N http://localhost:9668/events
+```
 
 3. **Checking the metrics endpoint**:
-   ```sh
-   curl http://localhost:9668/metrics
-   ```
+```sh
+curl http://localhost:9668/metrics
+```
 
 4. **Checking the health endpoint**:
-   ```sh
-   curl http://localhost:9668/health
-   ```
+```sh
+curl http://localhost:9668/health
+```
 
 ## Adding New Metrics
 
