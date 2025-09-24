@@ -2,14 +2,6 @@ const std = @import("std");
 const json = std.json;
 const types = @import("@zeam/types");
 
-pub const ProtoBlock = struct {
-    slot: types.Slot,
-    blockRoot: types.Root,
-    parentRoot: types.Root,
-    stateRoot: types.Root,
-    timeliness: bool,
-};
-
 /// SSE Event types for chain state changes
 pub const ChainEventType = enum {
     new_head,
@@ -25,7 +17,7 @@ pub const NewHeadEvent = struct {
     state_root: []const u8,
     timely: bool,
 
-    pub fn fromProtoBlock(allocator: std.mem.Allocator, proto_block: ProtoBlock) !NewHeadEvent {
+    pub fn fromProtoBlock(allocator: std.mem.Allocator, proto_block: types.ProtoBlock) !NewHeadEvent {
         const block_root_hex = try std.fmt.allocPrint(allocator, "0x{s}", .{std.fmt.fmtSliceHexLower(&proto_block.blockRoot)});
         const parent_root_hex = try std.fmt.allocPrint(allocator, "0x{s}", .{std.fmt.fmtSliceHexLower(&proto_block.parentRoot)});
         const state_root_hex = try std.fmt.allocPrint(allocator, "0x{s}", .{std.fmt.fmtSliceHexLower(&proto_block.stateRoot)});
@@ -160,7 +152,7 @@ pub fn serializeEventToJson(allocator: std.mem.Allocator, event: ChainEvent) ![]
 test "serialize new head event" {
     const allocator = std.testing.allocator;
 
-    const proto_block = ProtoBlock{
+    const proto_block = types.ProtoBlock{
         .slot = 123,
         .blockRoot = [_]u8{1} ** 32,
         .parentRoot = [_]u8{2} ** 32,

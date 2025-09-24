@@ -364,14 +364,14 @@ pub const BeamChain = struct {
         const processing_time = onblock_timer.observe();
 
         // 6. Emit new head event via SSE
-        const metrics_proto_block = api.events.ProtoBlock{
+        const proto_block = types.ProtoBlock{
             .slot = new_head.slot,
             .blockRoot = new_head.blockRoot,
             .parentRoot = new_head.parentRoot,
             .stateRoot = new_head.stateRoot,
             .timeliness = new_head.timeliness,
         };
-        if (api.events.NewHeadEvent.fromProtoBlock(self.allocator, metrics_proto_block)) |head_event| {
+        if (api.events.NewHeadEvent.fromProtoBlock(self.allocator, proto_block)) |head_event| {
             var chain_event = api.events.ChainEvent{ .new_head = head_event };
             event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
                 self.module_logger.warn("Failed to broadcast head event: {any}", .{err});
@@ -379,6 +379,31 @@ pub const BeamChain = struct {
             };
         } else |err| {
             self.module_logger.warn("Failed to create head event: {any}", .{err});
+        }
+
+        // 7. Emit justification/finalization events based on forkchoice store
+        const store = self.forkChoice.fcStore;
+        const latest_justified = store.latest_justified;
+        const latest_finalized = store.latest_finalized;
+
+        if (api.events.NewJustificationEvent.fromCheckpoint(self.allocator, latest_justified, new_head.slot)) |just_event| {
+            var chain_event = api.events.ChainEvent{ .new_justification = just_event };
+            event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
+                self.module_logger.warn("Failed to broadcast justification event: {any}", .{err});
+                chain_event.deinit(self.allocator);
+            };
+        } else |err| {
+            self.module_logger.warn("Failed to create justification event: {any}", .{err});
+        }
+
+        if (api.events.NewFinalizationEvent.fromCheckpoint(self.allocator, latest_finalized, new_head.slot)) |final_event| {
+            var chain_event = api.events.ChainEvent{ .new_finalization = final_event };
+            event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
+                self.module_logger.warn("Failed to broadcast finalization event: {any}", .{err});
+                chain_event.deinit(self.allocator);
+            };
+        } else |err| {
+            self.module_logger.warn("Failed to create finalization event: {any}", .{err});
         }
 
         self.module_logger.info("processed block with root=0x{s} slot={d} processing time={d} (computed root={} computed state={})", .{

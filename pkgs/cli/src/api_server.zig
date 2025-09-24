@@ -1,5 +1,6 @@
 const std = @import("std");
 const api = @import("@zeam/api");
+const constants = @import("constants.zig");
 const event_broadcaster = api.event_broadcaster;
 
 /// Simple metrics server that runs in a background thread
@@ -125,8 +126,8 @@ const SimpleMetricsServer = struct {
                 break;
             };
 
-            // Wait 30 seconds before next heartbeat
-            std.time.sleep(30 * std.time.ns_per_s);
+            // Wait between SSE heartbeats
+            std.time.sleep(constants.SSE_HEARTBEAT_SECONDS * std.time.ns_per_s);
         }
     }
 };
