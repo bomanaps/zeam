@@ -114,6 +114,7 @@ pub fn build(b: *Builder) !void {
         .optimize = optimize,
     });
     zeam_metrics.addImport("metrics", metrics);
+    zeam_metrics.addImport("@zeam/types", zeam_types);
 
     // add zeam-state-transition
     const zeam_state_transition = b.addModule("@zeam/state-transition", .{

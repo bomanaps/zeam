@@ -9,6 +9,7 @@ const ssz = @import("ssz");
 const networks = @import("@zeam/network");
 const params = @import("@zeam/params");
 const metrics = @import("@zeam/metrics");
+const event_broadcaster = metrics.event_broadcaster;
 
 const zeam_utils = @import("@zeam/utils");
 
@@ -359,8 +360,27 @@ pub const BeamChain = struct {
         }
 
         // 5. fc update head
-        _ = try self.forkChoice.updateHead();
+        const new_head = try self.forkChoice.updateHead();
         const processing_time = onblock_timer.observe();
+
+        // 6. Emit new head event via SSE
+        const metrics_proto_block = metrics.events.ProtoBlock{
+            .slot = new_head.slot,
+            .blockRoot = new_head.blockRoot,
+            .parentRoot = new_head.parentRoot,
+            .stateRoot = new_head.stateRoot,
+            .timeliness = new_head.timeliness,
+        };
+        if (metrics.events.NewHeadEvent.fromProtoBlock(self.allocator, metrics_proto_block)) |head_event| {
+            var chain_event = metrics.events.ChainEvent{ .new_head = head_event };
+            event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
+                self.module_logger.warn("Failed to broadcast head event: {any}", .{err});
+                chain_event.deinit(self.allocator);
+            };
+        } else |err| {
+            self.module_logger.warn("Failed to create head event: {any}", .{err});
+        }
+
         self.module_logger.info("processed block with root=0x{s} slot={d} processing time={d} (computed root={} computed state={})", .{
             std.fmt.fmtSliceHexLower(&fcBlock.blockRoot),
             block.slot,

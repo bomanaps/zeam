@@ -1,8 +1,12 @@
 const std = @import("std");
 const metrics = @import("@zeam/metrics");
+const event_broadcaster = metrics.event_broadcaster;
 
 /// Simple metrics server that runs in a background thread
 pub fn startMetricsServer(allocator: std.mem.Allocator, port: u16) !void {
+    // Initialize the global event broadcaster
+    try event_broadcaster.initGlobalBroadcaster(allocator);
+
     // Create a simple HTTP server context
     const ctx = try allocator.create(SimpleMetricsServer);
     errdefer allocator.destroy(ctx);
@@ -16,6 +20,51 @@ pub fn startMetricsServer(allocator: std.mem.Allocator, port: u16) !void {
     thread.detach();
 
     std.log.info("Metrics server started on port {d}", .{port});
+}
+
+/// Handle individual HTTP connections in a separate thread
+fn handleConnection(connection: std.net.Server.Connection, allocator: std.mem.Allocator) void {
+    defer connection.stream.close();
+
+    var buffer: [4096]u8 = undefined;
+    var http_server = std.http.Server.init(connection, &buffer);
+    var request = http_server.receiveHead() catch |err| {
+        std.log.warn("Failed to receive HTTP head: {}", .{err});
+        return;
+    };
+
+    // Route handling
+    if (std.mem.eql(u8, request.head.target, "/events")) {
+        // Handle SSE connection - this will keep the connection alive
+        SimpleMetricsServer.handleSSEEvents(connection.stream, allocator) catch |err| {
+            std.log.warn("SSE connection failed: {}", .{err});
+        };
+    } else if (std.mem.eql(u8, request.head.target, "/metrics")) {
+        // Handle metrics request
+        var metrics_output = std.ArrayList(u8).init(allocator);
+        defer metrics_output.deinit();
+
+        metrics.writeMetrics(metrics_output.writer()) catch {
+            _ = request.respond("Internal Server Error\n", .{}) catch {};
+            return;
+        };
+
+        _ = request.respond(metrics_output.items, .{
+            .extra_headers = &.{
+                .{ .name = "content-type", .value = "text/plain; version=0.0.4; charset=utf-8" },
+            },
+        }) catch {};
+    } else if (std.mem.eql(u8, request.head.target, "/health")) {
+        // Handle health check
+        const response = "{\"status\":\"healthy\",\"service\":\"zeam-metrics\"}";
+        _ = request.respond(response, .{
+            .extra_headers = &.{
+                .{ .name = "content-type", .value = "application/json; charset=utf-8" },
+            },
+        }) catch {};
+    } else {
+        _ = request.respond("Not Found\n", .{ .status = .not_found }) catch {};
+    }
 }
 
 /// Simple metrics server context
@@ -34,47 +83,50 @@ const SimpleMetricsServer = struct {
 
         while (true) {
             const connection = server.accept() catch continue;
-            defer connection.stream.close();
 
-            // Handle HTTP request
-            var buffer: [4096]u8 = undefined;
-            var http_server = std.http.Server.init(connection, &buffer);
-            var request = http_server.receiveHead() catch continue;
-
-            // Route handling
-            if (std.mem.eql(u8, request.head.target, "/metrics")) {
-                try self.handleMetrics(&request);
-            } else if (std.mem.eql(u8, request.head.target, "/health")) {
-                try self.handleHealth(&request);
-            } else {
-                _ = request.respond("Not Found\n", .{ .status = .not_found }) catch {};
-            }
+            // For SSE connections, we need to handle them differently
+            // We'll spawn a new thread for each connection to handle persistence
+            _ = std.Thread.spawn(.{}, handleConnection, .{ connection, self.allocator }) catch |err| {
+                std.log.warn("Failed to spawn connection handler: {}", .{err});
+                connection.stream.close();
+                continue;
+            };
         }
     }
 
-    fn handleMetrics(self: *SimpleMetricsServer, request: *std.http.Server.Request) !void {
-        var metrics_output = std.ArrayList(u8).init(self.allocator);
-        defer metrics_output.deinit();
+    fn handleSSEEvents(stream: std.net.Stream, allocator: std.mem.Allocator) !void {
+        _ = allocator;
+        // Set SSE headers manually by writing HTTP response
+        const sse_headers = "HTTP/1.1 200 OK\r\n" ++
+            "Content-Type: text/event-stream\r\n" ++
+            "Cache-Control: no-cache\r\n" ++
+            "Connection: keep-alive\r\n" ++
+            "Access-Control-Allow-Origin: *\r\n" ++
+            "Access-Control-Allow-Headers: Cache-Control\r\n" ++
+            "\r\n";
 
-        metrics.writeMetrics(metrics_output.writer()) catch {
-            _ = request.respond("Internal Server Error\n", .{}) catch {};
-            return;
-        };
+        // Send initial response with SSE headers
+        try stream.writeAll(sse_headers);
 
-        _ = request.respond(metrics_output.items, .{
-            .extra_headers = &.{
-                .{ .name = "content-type", .value = "text/plain; version=0.0.4; charset=utf-8" },
-            },
-        }) catch {};
-    }
+        // Send initial connection event
+        const connection_event = "event: connection\ndata: {\"status\":\"connected\"}\n\n";
+        try stream.writeAll(connection_event);
 
-    fn handleHealth(self: *SimpleMetricsServer, request: *std.http.Server.Request) !void {
-        _ = self; // Use self to avoid unused parameter warning
-        const response = "{\"status\":\"healthy\",\"service\":\"zeam-metrics\"}";
-        _ = request.respond(response, .{
-            .extra_headers = &.{
-                .{ .name = "content-type", .value = "application/json; charset=utf-8" },
-            },
-        }) catch {};
+        // Register this connection with the global event broadcaster
+        try event_broadcaster.addGlobalConnection(stream);
+
+        // Keep the connection alive - the broadcaster will handle event streaming
+        // This thread will stay alive as long as the connection is active
+        while (true) {
+            // Send periodic heartbeat to keep connection alive
+            const heartbeat = ": heartbeat\n\n";
+            stream.writeAll(heartbeat) catch |err| {
+                std.log.warn("SSE connection closed: {}", .{err});
+                break;
+            };
+
+            // Wait 30 seconds before next heartbeat
+            std.time.sleep(30 * std.time.ns_per_s);
+        }
     }
 };

@@ -9,6 +9,9 @@ const debugLog = zeam_utils.zeamLog;
 
 const params = @import("@zeam/params");
 
+// Conditional metrics import - only available in non-ZKVM contexts
+const is_zkvm = @import("builtin").target.os.tag == .freestanding;
+
 // put the active logs at debug level for now by default
 pub const StateTransitionOpts = struct {
     // signatures are validated outside for keeping life simple for the STF prover
@@ -241,6 +244,20 @@ fn process_attestations(allocator: Allocator, state: *types.BeamState, attestati
             _ = justifications.remove(vote.target.root);
             logger.debug("\n\n\n-----------------HURRAY JUSTIFICATION ------------\n{any}\n--------------\n---------------\n-------------------------\n\n\n", .{state.latest_justified});
 
+            // Emit new justification event via SSE (only in non-ZKVM contexts)
+            if (!is_zkvm) {
+                const metrics_module = @import("@zeam/metrics");
+                if (metrics_module.events.NewJustificationEvent.fromCheckpoint(allocator, vote.target, state.slot)) |just_event| {
+                    var chain_event = metrics_module.events.ChainEvent{ .new_justification = just_event };
+                    metrics_module.event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
+                        logger.warn("Failed to broadcast justification event: {any}", .{err});
+                        chain_event.deinit(allocator);
+                    };
+                } else |err| {
+                    logger.warn("Failed to create justification event: {any}", .{err});
+                }
+            }
+
             // source is finalized if target is the next valid justifiable hash
             var can_target_finalize = true;
             for (source_slot + 1..target_slot) |check_slot| {
@@ -253,6 +270,20 @@ fn process_attestations(allocator: Allocator, state: *types.BeamState, attestati
             if (can_target_finalize == true) {
                 state.latest_finalized = vote.source;
                 logger.debug("\n\n\n-----------------DOUBLE HURRAY FINALIZATION ------------\n{any}\n--------------\n---------------\n-------------------------\n\n\n", .{state.latest_finalized});
+
+                // Emit new finalization event via SSE (only in non-ZKVM contexts)
+                if (!is_zkvm) {
+                    const metrics_module = @import("@zeam/metrics");
+                    if (metrics_module.events.NewFinalizationEvent.fromCheckpoint(allocator, vote.source, state.slot)) |final_event| {
+                        var chain_event = metrics_module.events.ChainEvent{ .new_finalization = final_event };
+                        metrics_module.event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
+                            logger.warn("Failed to broadcast finalization event: {any}", .{err});
+                            chain_event.deinit(allocator);
+                        };
+                    } else |err| {
+                        logger.warn("Failed to create finalization event: {any}", .{err});
+                    }
+                }
             }
         }
     }

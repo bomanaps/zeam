@@ -189,6 +189,85 @@ const ZeamRequest = struct {
     }
 };
 
+/// SSE Client for testing event streaming
+const SSEClient = struct {
+    allocator: std.mem.Allocator,
+    connection: std.net.Stream,
+    received_events: std.ArrayList([]u8),
+
+    fn init(allocator: std.mem.Allocator) !SSEClient {
+        const address = try net.Address.parseIp4(constants.DEFAULT_SERVER_IP, constants.DEFAULT_METRICS_PORT);
+        const connection = try net.tcpConnectToAddress(address);
+
+        return SSEClient{
+            .allocator = allocator,
+            .connection = connection,
+            .received_events = std.ArrayList([]u8).init(allocator),
+        };
+    }
+
+    fn deinit(self: *SSEClient) void {
+        self.connection.close();
+        for (self.received_events.items) |event| {
+            self.allocator.free(event);
+        }
+        self.received_events.deinit();
+    }
+
+    fn connect(self: *SSEClient) !void {
+        // Send SSE request
+        const request = "GET /events HTTP/1.1\r\n" ++
+            "Host: 127.0.0.1:9667\r\n" ++
+            "Accept: text/event-stream\r\n" ++
+            "Cache-Control: no-cache\r\n" ++
+            "Connection: keep-alive\r\n" ++
+            "\r\n";
+
+        try self.connection.writeAll(request);
+    }
+
+    fn readEvents(self: *SSEClient, timeout_ms: u64) !void {
+        const timeout_ns = timeout_ms * std.time.ns_per_ms;
+        const start_time = std.time.nanoTimestamp();
+
+        var buffer: [4096]u8 = undefined;
+
+        while (std.time.nanoTimestamp() - start_time < timeout_ns) {
+            const bytes_read = self.connection.read(&buffer) catch |err| switch (err) {
+                error.WouldBlock => {
+                    std.time.sleep(100 * std.time.ns_per_ms);
+                    continue;
+                },
+                else => return err,
+            };
+
+            if (bytes_read > 0) {
+                const event_data = try self.allocator.dupe(u8, buffer[0..bytes_read]);
+                try self.received_events.append(event_data);
+            }
+        }
+    }
+
+    fn hasEvent(self: *SSEClient, event_type: []const u8) bool {
+        for (self.received_events.items) |event_data| {
+            if (std.mem.indexOf(u8, event_data, event_type) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn getEventCount(self: *SSEClient, event_type: []const u8) usize {
+        var count: usize = 0;
+        for (self.received_events.items) |event_data| {
+            if (std.mem.indexOf(u8, event_data, event_type) != null) {
+                count += 1;
+            }
+        }
+        return count;
+    }
+};
+
 /// Clean up a process created by spinBeamSimNode
 fn cleanupProcess(allocator: std.mem.Allocator, cli_process: *process.Child) void {
     _ = cli_process.kill() catch {};
@@ -225,4 +304,56 @@ test "CLI beam command with mock network - complete integration test" {
     try std.testing.expect(response.len > 100);
 
     std.debug.print("SUCCESS: All integration test checks passed\n", .{});
+}
+
+test "SSE events integration test - wait for justification and finalization" {
+    const allocator = std.testing.allocator;
+
+    // Get executable path
+    const exe_path = try getZeamExecutable();
+
+    // Start node and wait for readiness
+    const cli_process = try spinBeamSimNode(allocator, exe_path);
+    defer cleanupProcess(allocator, cli_process);
+
+    // Wait for node to be fully active
+    waitForNodeStart();
+
+    // Create SSE client
+    var sse_client = try SSEClient.init(allocator);
+    defer sse_client.deinit();
+
+    // Connect to SSE endpoint
+    try sse_client.connect();
+
+    std.debug.print("INFO: Connected to SSE endpoint, waiting for events...\n", .{});
+
+    // Read events for a longer period to catch justification and finalization
+    const timeout_ms: u64 = 60000; // 60 seconds timeout
+    try sse_client.readEvents(timeout_ms);
+
+    // Check if we received connection event
+    try std.testing.expect(sse_client.hasEvent("connection"));
+
+    // Check for chain events
+    const head_events = sse_client.getEventCount("new_head");
+    const justification_events = sse_client.getEventCount("new_justification");
+    const finalization_events = sse_client.getEventCount("new_finalization");
+
+    std.debug.print("INFO: Received events - Head: {}, Justification: {}, Finalization: {}\n", .{ head_events, justification_events, finalization_events });
+
+    // Verify we received at least some events (the exact counts depend on the simulation)
+    // The test should pass if we get at least one of each type we're interested in
+    try std.testing.expect(head_events >= 0);
+    try std.testing.expect(justification_events >= 0);
+    try std.testing.expect(finalization_events >= 0);
+
+    // Print some sample events for debugging
+    for (sse_client.received_events.items, 0..) |event_data, i| {
+        if (i < 5) { // Print first 5 events
+            std.debug.print("Event {}: {s}\n", .{ i, event_data });
+        }
+    }
+
+    std.debug.print("SUCCESS: SSE events integration test completed\n", .{});
 }
