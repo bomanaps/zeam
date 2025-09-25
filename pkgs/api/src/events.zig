@@ -123,39 +123,35 @@ pub const ChainEvent = union(ChainEventType) {
 
 /// Serialize a chain event to JSON for SSE
 pub fn serializeEventToJson(allocator: std.mem.Allocator, event: ChainEvent) ![]u8 {
-    const event_name = switch (event) {
-        .new_head => "new_head",
-        .new_justification => "new_justification",
-        .new_finalization => "new_finalization",
-    };
+    const event_name = @tagName(std.meta.activeTag(event));
 
-    var json_str = std.ArrayList(u8).init(allocator);
-    defer json_str.deinit();
+    var json_str = std.ArrayListUnmanaged(u8){};
+    defer json_str.deinit(allocator);
 
     // Format as SSE event
-    try json_str.appendSlice("event: ");
-    try json_str.appendSlice(event_name);
-    try json_str.appendSlice("\ndata: ");
+    try json_str.appendSlice(allocator, "event: ");
+    try json_str.appendSlice(allocator, event_name);
+    try json_str.appendSlice(allocator, "\ndata: ");
 
     // Serialize the data based on event type
     switch (event) {
         .new_head => |head_event| {
             const data_value = try head_event.toJson(allocator);
-            try json.stringify(data_value, .{}, json_str.writer());
+            try json.stringify(data_value, .{}, json_str.writer(allocator));
         },
         .new_justification => |just_event| {
             const data_value = try just_event.toJson(allocator);
-            try json.stringify(data_value, .{}, json_str.writer());
+            try json.stringify(data_value, .{}, json_str.writer(allocator));
         },
         .new_finalization => |final_event| {
             const data_value = try final_event.toJson(allocator);
-            try json.stringify(data_value, .{}, json_str.writer());
+            try json.stringify(data_value, .{}, json_str.writer(allocator));
         },
     }
 
-    try json_str.appendSlice("\n\n");
+    try json_str.appendSlice(allocator, "\n\n");
 
-    return json_str.toOwnedSlice();
+    return json_str.toOwnedSlice(allocator);
 }
 
 test "serialize new head event" {
