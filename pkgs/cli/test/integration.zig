@@ -226,26 +226,109 @@ const SSEClient = struct {
         try self.connection.writeAll(request);
     }
 
-    fn readEvents(self: *SSEClient, timeout_ms: u64) !void {
+    fn readEvents(self: *SSEClient, timeout_ms: u64) !struct { got_justification: bool, got_finalization: bool } {
         const timeout_ns = timeout_ms * std.time.ns_per_ms;
         const start_time = std.time.nanoTimestamp();
 
         var buffer: [4096]u8 = undefined;
+        var accum = std.ArrayList(u8).init(self.allocator);
+        defer accum.deinit();
 
-        while (std.time.nanoTimestamp() - start_time < timeout_ns) {
+        var got_justification = false;
+        var got_finalization = false;
+
+        while (std.time.nanoTimestamp() - start_time < timeout_ns and !(got_justification and got_finalization)) {
             const bytes_read = self.connection.read(&buffer) catch |err| switch (err) {
                 error.WouldBlock => {
-                    std.time.sleep(100 * std.time.ns_per_ms);
+                    std.time.sleep(50 * std.time.ns_per_ms);
                     continue;
                 },
                 else => return err,
             };
 
-            if (bytes_read > 0) {
-                const event_data = try self.allocator.dupe(u8, buffer[0..bytes_read]);
-                try self.received_events.append(event_data);
+            if (bytes_read == 0) {
+                std.time.sleep(50 * std.time.ns_per_ms);
+                continue;
+            }
+
+            // Keep raw chunk for debugging
+            const raw_chunk = try self.allocator.dupe(u8, buffer[0..bytes_read]);
+            defer self.allocator.free(raw_chunk);
+            try self.received_events.append(try self.allocator.dupe(u8, raw_chunk));
+
+            // Append into accumulator
+            try accum.appendSlice(raw_chunk);
+
+            // Process complete SSE events separated by double newlines
+            while (true) {
+                const sep = std.mem.indexOf(u8, accum.items, "\n\n") orelse std.mem.indexOf(u8, accum.items, "\r\n\r\n");
+                if (sep == null) break;
+                const is_crlf = std.mem.startsWith(u8, accum.items[sep.?..], "\r\n\r\n");
+                const end_idx: usize = sep.? + (if (is_crlf) @as(usize, 4) else @as(usize, 2));
+                const event_block = accum.items[0..end_idx];
+
+                // Parse event type
+                const event_line_start = std.mem.indexOf(u8, event_block, "event:") orelse null;
+                const data_line_start = std.mem.indexOf(u8, event_block, "data:") orelse null;
+                if (event_line_start != null and data_line_start != null) {
+                    // Extract event type token
+                    const event_line_slice = blk: {
+                        const nl = std.mem.indexOfScalarPos(u8, event_block, event_line_start.?, '\n') orelse event_block.len;
+                        break :blk std.mem.trim(u8, event_block[event_line_start.? + "event:".len .. nl], " \t\r\n");
+                    };
+
+                    // Extract JSON payload after data:
+                    const data_line_slice = blk2: {
+                        const nl = std.mem.indexOfScalarPos(u8, event_block, data_line_start.?, '\n') orelse event_block.len;
+                        break :blk2 std.mem.trim(u8, event_block[data_line_start.? + "data:".len .. nl], " \t\r\n");
+                    };
+
+                    // Only parse json for justification/finalization
+                    if (!got_justification and std.mem.eql(u8, event_line_slice, "new_justification")) {
+                        const parsed = std.json.parseFromSlice(std.json.Value, self.allocator, data_line_slice, .{ .ignore_unknown_fields = true }) catch null;
+                        if (parsed) |p| {
+                            defer p.deinit();
+                            if (p.value.object.get("justified_slot")) |js| {
+                                switch (js) {
+                                    .integer => |ival| {
+                                        if (ival > 0) {
+                                            got_justification = true;
+                                        }
+                                    },
+                                    else => {},
+                                }
+                            }
+                        }
+                    } else if (!got_finalization and std.mem.eql(u8, event_line_slice, "new_finalization")) {
+                        const parsed = std.json.parseFromSlice(std.json.Value, self.allocator, data_line_slice, .{ .ignore_unknown_fields = true }) catch null;
+                        if (parsed) |p| {
+                            defer p.deinit();
+                            if (p.value.object.get("finalized_slot")) |fs| {
+                                switch (fs) {
+                                    .integer => |ival| {
+                                        if (ival > 0) {
+                                            got_finalization = true;
+                                        }
+                                    },
+                                    else => {},
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Remove processed block from accumulator
+                const remaining_len = accum.items.len - end_idx;
+                if (remaining_len > 0) {
+                    std.mem.copyForwards(u8, accum.items[0..remaining_len], accum.items[end_idx..accum.items.len]);
+                    accum.shrinkRetainingCapacity(remaining_len);
+                } else {
+                    accum.clearRetainingCapacity();
+                }
             }
         }
+
+        return .{ .got_justification = got_justification, .got_finalization = got_finalization };
     }
 
     fn hasEvent(self: *SSEClient, event_type: []const u8) bool {
@@ -330,105 +413,9 @@ test "SSE events integration test - wait for justification and finalization" {
 
     // Read events until both justification and finalization are seen, or timeout
     const timeout_ms: u64 = 120000; // 120 seconds timeout
-    const start_ns = std.time.nanoTimestamp();
-    const deadline_ns = start_ns + timeout_ms * std.time.ns_per_ms;
-    var got_justification = false;
-    var got_finalization = false;
-
-    // streaming loop: accumulate SSE and parse JSON payloads
-    var read_buf: [4096]u8 = undefined;
-    var accum = std.ArrayList(u8).init(allocator);
-    defer accum.deinit();
-
-    while (std.time.nanoTimestamp() < deadline_ns and !(got_justification and got_finalization)) {
-        const bytes_read = sse_client.connection.read(&read_buf) catch |err| switch (err) {
-            error.WouldBlock => {
-                std.time.sleep(50 * std.time.ns_per_ms);
-                continue;
-            },
-            else => return err,
-        };
-        if (bytes_read == 0) {
-            std.time.sleep(50 * std.time.ns_per_ms);
-            continue;
-        }
-
-        // keep raw chunk for debugging like before
-        const raw_chunk = try allocator.dupe(u8, read_buf[0..bytes_read]);
-        defer allocator.free(raw_chunk);
-        try sse_client.received_events.append(try allocator.dupe(u8, raw_chunk));
-
-        // append into accumulator
-        try accum.appendSlice(raw_chunk);
-
-        // process complete SSE events separated by double newlines
-        while (true) {
-            const sep = std.mem.indexOf(u8, accum.items, "\n\n") orelse std.mem.indexOf(u8, accum.items, "\r\n\r\n");
-            if (sep == null) break;
-            const is_crlf = std.mem.startsWith(u8, accum.items[sep.?..], "\r\n\r\n");
-            const end_idx: usize = sep.? + (if (is_crlf) @as(usize, 4) else @as(usize, 2));
-            const event_block = accum.items[0..end_idx];
-
-            // parse event type
-            const event_line_start = std.mem.indexOf(u8, event_block, "event:") orelse null;
-            const data_line_start = std.mem.indexOf(u8, event_block, "data:") orelse null;
-            if (event_line_start != null and data_line_start != null) {
-                // extract event type token
-                const event_line_slice = blk: {
-                    const nl = std.mem.indexOfScalarPos(u8, event_block, event_line_start.?, '\n') orelse event_block.len;
-                    break :blk std.mem.trim(u8, event_block[event_line_start.? + "event:".len .. nl], " \t\r\n");
-                };
-
-                // extract JSON payload after data:
-                const data_line_slice = blk2: {
-                    const nl = std.mem.indexOfScalarPos(u8, event_block, data_line_start.?, '\n') orelse event_block.len;
-                    break :blk2 std.mem.trim(u8, event_block[data_line_start.? + "data:".len .. nl], " \t\r\n");
-                };
-
-                // only parse json for justification/finalization
-                if (!got_justification and std.mem.eql(u8, event_line_slice, "new_justification")) {
-                    const parsed = std.json.parseFromSlice(std.json.Value, allocator, data_line_slice, .{ .ignore_unknown_fields = true }) catch null;
-                    if (parsed) |p| {
-                        defer p.deinit();
-                        if (p.value.object.get("justified_slot")) |js| {
-                            switch (js) {
-                                .integer => |ival| {
-                                    if (ival > 0) {
-                                        got_justification = true;
-                                    }
-                                },
-                                else => {},
-                            }
-                        }
-                    }
-                } else if (!got_finalization and std.mem.eql(u8, event_line_slice, "new_finalization")) {
-                    const parsed = std.json.parseFromSlice(std.json.Value, allocator, data_line_slice, .{ .ignore_unknown_fields = true }) catch null;
-                    if (parsed) |p| {
-                        defer p.deinit();
-                        if (p.value.object.get("finalized_slot")) |fs| {
-                            switch (fs) {
-                                .integer => |ival| {
-                                    if (ival > 0) {
-                                        got_finalization = true;
-                                    }
-                                },
-                                else => {},
-                            }
-                        }
-                    }
-                }
-            }
-
-            // remove processed block from accumulator
-            const remaining_len = accum.items.len - end_idx;
-            if (remaining_len > 0) {
-                std.mem.copyForwards(u8, accum.items[0..remaining_len], accum.items[end_idx..accum.items.len]);
-                accum.shrinkRetainingCapacity(remaining_len);
-            } else {
-                accum.clearRetainingCapacity();
-            }
-        }
-    }
+    const result = try sse_client.readEvents(timeout_ms);
+    const got_justification = result.got_justification;
+    const got_finalization = result.got_finalization;
 
     // Check if we received connection event
     try std.testing.expect(sse_client.hasEvent("connection"));
