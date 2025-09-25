@@ -2,6 +2,7 @@ const std = @import("std");
 const Thread = std.Thread;
 const Mutex = Thread.Mutex;
 const events = @import("./events.zig");
+const types = @import("@zeam/types");
 
 /// SSE connection wrapper
 pub const SSEConnection = struct {
@@ -193,7 +194,7 @@ test "event broadcaster basic functionality" {
     try std.testing.expect(broadcaster.getConnectionCount() == 1);
 
     // Test broadcasting an event
-    const proto_block = events.ProtoBlock{
+    const proto_block = types.ProtoBlock{
         .slot = 123,
         .blockRoot = [_]u8{1} ** 32,
         .parentRoot = [_]u8{2} ** 32,
@@ -204,10 +205,10 @@ test "event broadcaster basic functionality" {
     const head_event = try events.NewHeadEvent.fromProtoBlock(allocator, proto_block);
     defer head_event.deinit(allocator);
 
-    const chain_event = events.ChainEvent{ .new_head = head_event };
+    var chain_event = events.ChainEvent{ .new_head = head_event };
 
     // This should not error even if the pipe is closed
-    broadcaster.broadcastEvent(chain_event) catch |err| {
+    broadcaster.broadcastEvent(&chain_event) catch |err| {
         // Expected to fail since we're using a pipe, but should handle gracefully
         std.log.debug("Expected broadcast error in test: {}", .{err});
     };
@@ -234,8 +235,8 @@ test "global broadcaster functionality" {
     const just_event = try events.NewJustificationEvent.fromCheckpoint(allocator, checkpoint, 123);
     defer just_event.deinit(allocator);
 
-    const chain_event = events.ChainEvent{ .new_justification = just_event };
+    var chain_event = events.ChainEvent{ .new_justification = just_event };
 
     // Should not error even with no connections
-    try broadcastGlobalEvent(chain_event);
+    try broadcastGlobalEvent(&chain_event);
 }
