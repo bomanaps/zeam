@@ -9,9 +9,6 @@ const debugLog = zeam_utils.zeamLog;
 
 const params = @import("@zeam/params");
 
-// Conditional metrics import - only available in non-ZKVM contexts
-const is_zkvm = @import("builtin").target.os.tag == .freestanding;
-
 // put the active logs at debug level for now by default
 pub const StateTransitionOpts = struct {
     // signatures are validated outside for keeping life simple for the STF prover

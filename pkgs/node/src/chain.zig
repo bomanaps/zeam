@@ -363,15 +363,8 @@ pub const BeamChain = struct {
         const new_head = try self.forkChoice.updateHead();
         const processing_time = onblock_timer.observe();
 
-        // 6. Emit new head event via SSE
-        const proto_block = types.ProtoBlock{
-            .slot = new_head.slot,
-            .blockRoot = new_head.blockRoot,
-            .parentRoot = new_head.parentRoot,
-            .stateRoot = new_head.stateRoot,
-            .timeliness = new_head.timeliness,
-        };
-        if (api.events.NewHeadEvent.fromProtoBlock(self.allocator, proto_block)) |head_event| {
+        // 6. Emit new head event via SSE (use forkchoice ProtoBlock directly)
+        if (api.events.NewHeadEvent.fromProtoBlock(self.allocator, new_head)) |head_event| {
             var chain_event = api.events.ChainEvent{ .new_head = head_event };
             event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
                 self.module_logger.warn("Failed to broadcast head event: {any}", .{err});
