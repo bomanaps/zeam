@@ -31,6 +31,16 @@ pub const NewHeadEvent = struct {
         };
     }
 
+    pub fn toJson(self: *const NewHeadEvent, allocator: std.mem.Allocator) !json.Value {
+        var obj = json.ObjectMap.init(allocator);
+        try obj.put("slot", json.Value{ .integer = @as(i64, @intCast(self.slot)) });
+        try obj.put("block_root", json.Value{ .string = self.block_root });
+        try obj.put("parent_root", json.Value{ .string = self.parent_root });
+        try obj.put("state_root", json.Value{ .string = self.state_root });
+        try obj.put("timely", json.Value{ .bool = self.timely });
+        return json.Value{ .object = obj };
+    }
+
     pub fn deinit(self: *NewHeadEvent, allocator: std.mem.Allocator) void {
         allocator.free(self.block_root);
         allocator.free(self.parent_root);
@@ -54,6 +64,14 @@ pub const NewJustificationEvent = struct {
         };
     }
 
+    pub fn toJson(self: *const NewJustificationEvent, allocator: std.mem.Allocator) !json.Value {
+        var obj = json.ObjectMap.init(allocator);
+        try obj.put("slot", json.Value{ .integer = @as(i64, @intCast(self.slot)) });
+        try obj.put("root", json.Value{ .string = self.root });
+        try obj.put("justified_slot", json.Value{ .integer = @as(i64, @intCast(self.justified_slot)) });
+        return json.Value{ .object = obj };
+    }
+
     pub fn deinit(self: *NewJustificationEvent, allocator: std.mem.Allocator) void {
         allocator.free(self.root);
     }
@@ -73,6 +91,14 @@ pub const NewFinalizationEvent = struct {
             .root = root_hex,
             .finalized_slot = checkpoint.slot,
         };
+    }
+
+    pub fn toJson(self: *const NewFinalizationEvent, allocator: std.mem.Allocator) !json.Value {
+        var obj = json.ObjectMap.init(allocator);
+        try obj.put("slot", json.Value{ .integer = @as(i64, @intCast(self.slot)) });
+        try obj.put("root", json.Value{ .string = self.root });
+        try obj.put("finalized_slot", json.Value{ .integer = @as(i64, @intCast(self.finalized_slot)) });
+        return json.Value{ .object = obj };
     }
 
     pub fn deinit(self: *NewFinalizationEvent, allocator: std.mem.Allocator) void {
@@ -114,32 +140,15 @@ pub fn serializeEventToJson(allocator: std.mem.Allocator, event: ChainEvent) ![]
     // Serialize the data based on event type
     switch (event) {
         .new_head => |head_event| {
-            var data_obj = json.ObjectMap.init(allocator);
-            try data_obj.put("slot", json.Value{ .integer = @as(i64, @intCast(head_event.slot)) });
-            try data_obj.put("block_root", json.Value{ .string = head_event.block_root });
-            try data_obj.put("parent_root", json.Value{ .string = head_event.parent_root });
-            try data_obj.put("state_root", json.Value{ .string = head_event.state_root });
-            try data_obj.put("timely", json.Value{ .bool = head_event.timely });
-
-            const data_value = json.Value{ .object = data_obj };
+            const data_value = try head_event.toJson(allocator);
             try json.stringify(data_value, .{}, json_str.writer());
         },
         .new_justification => |just_event| {
-            var data_obj = json.ObjectMap.init(allocator);
-            try data_obj.put("slot", json.Value{ .integer = @as(i64, @intCast(just_event.slot)) });
-            try data_obj.put("root", json.Value{ .string = just_event.root });
-            try data_obj.put("justified_slot", json.Value{ .integer = @as(i64, @intCast(just_event.justified_slot)) });
-
-            const data_value = json.Value{ .object = data_obj };
+            const data_value = try just_event.toJson(allocator);
             try json.stringify(data_value, .{}, json_str.writer());
         },
         .new_finalization => |final_event| {
-            var data_obj = json.ObjectMap.init(allocator);
-            try data_obj.put("slot", json.Value{ .integer = @as(i64, @intCast(final_event.slot)) });
-            try data_obj.put("root", json.Value{ .string = final_event.root });
-            try data_obj.put("finalized_slot", json.Value{ .integer = @as(i64, @intCast(final_event.finalized_slot)) });
-
-            const data_value = json.Value{ .object = data_obj };
+            const data_value = try final_event.toJson(allocator);
             try json.stringify(data_value, .{}, json_str.writer());
         },
     }
