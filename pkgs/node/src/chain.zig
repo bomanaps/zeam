@@ -56,6 +56,9 @@ pub const BeamChain = struct {
     stf_logger: zeam_utils.ModuleLogger,
     block_building_logger: zeam_utils.ModuleLogger,
     registered_validator_ids: []usize = &[_]usize{},
+    // Track last-emitted checkpoints to avoid duplicate SSE events (e.g., genesis spam)
+    last_emitted_justified_slot: u64 = 0,
+    last_emitted_finalized_slot: u64 = 0,
 
     const Self = @This();
     pub fn init(
@@ -78,6 +81,8 @@ pub const BeamChain = struct {
             .module_logger = logger_config.logger(.chain),
             .stf_logger = logger_config.logger(.state_transition),
             .block_building_logger = logger_config.logger(.state_transition_block_building),
+            .last_emitted_justified_slot = 0,
+            .last_emitted_finalized_slot = 0,
         };
     }
 
@@ -379,24 +384,32 @@ pub const BeamChain = struct {
         const latest_justified = store.latest_justified;
         const latest_finalized = store.latest_finalized;
 
-        if (api.events.NewJustificationEvent.fromCheckpoint(self.allocator, latest_justified, new_head.slot)) |just_event| {
-            var chain_event = api.events.ChainEvent{ .new_justification = just_event };
-            event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
-                self.module_logger.warn("Failed to broadcast justification event: {any}", .{err});
-                chain_event.deinit(self.allocator);
-            };
-        } else |err| {
-            self.module_logger.warn("Failed to create justification event: {any}", .{err});
+        // Emit justification event only when slot increases beyond last emitted
+        if (latest_justified.slot > self.last_emitted_justified_slot) {
+            if (api.events.NewJustificationEvent.fromCheckpoint(self.allocator, latest_justified, new_head.slot)) |just_event| {
+                var chain_event = api.events.ChainEvent{ .new_justification = just_event };
+                event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
+                    self.module_logger.warn("Failed to broadcast justification event: {any}", .{err});
+                    chain_event.deinit(self.allocator);
+                };
+                self.last_emitted_justified_slot = latest_justified.slot;
+            } else |err| {
+                self.module_logger.warn("Failed to create justification event: {any}", .{err});
+            }
         }
 
-        if (api.events.NewFinalizationEvent.fromCheckpoint(self.allocator, latest_finalized, new_head.slot)) |final_event| {
-            var chain_event = api.events.ChainEvent{ .new_finalization = final_event };
-            event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
-                self.module_logger.warn("Failed to broadcast finalization event: {any}", .{err});
-                chain_event.deinit(self.allocator);
-            };
-        } else |err| {
-            self.module_logger.warn("Failed to create finalization event: {any}", .{err});
+        // Emit finalization event only when slot increases beyond last emitted
+        if (latest_finalized.slot > self.last_emitted_finalized_slot) {
+            if (api.events.NewFinalizationEvent.fromCheckpoint(self.allocator, latest_finalized, new_head.slot)) |final_event| {
+                var chain_event = api.events.ChainEvent{ .new_finalization = final_event };
+                event_broadcaster.broadcastGlobalEvent(&chain_event) catch |err| {
+                    self.module_logger.warn("Failed to broadcast finalization event: {any}", .{err});
+                    chain_event.deinit(self.allocator);
+                };
+                self.last_emitted_finalized_slot = latest_finalized.slot;
+            } else |err| {
+                self.module_logger.warn("Failed to create finalization event: {any}", .{err});
+            }
         }
 
         self.module_logger.info("processed block with root=0x{s} slot={d} processing time={d} (computed root={} computed state={})", .{

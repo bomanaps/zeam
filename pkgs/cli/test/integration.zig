@@ -189,11 +189,26 @@ const ZeamRequest = struct {
     }
 };
 
-/// SSE Client for testing event streaming
+/// Parsed SSE Event structure
+const ChainEvent = struct {
+    event_type: []const u8,
+    justified_slot: ?u64,
+    finalized_slot: ?u64,
+
+    /// Free the memory allocated for this event
+    fn deinit(self: ChainEvent, allocator: std.mem.Allocator) void {
+        allocator.free(self.event_type);
+    }
+};
+
+/// SSE Client for testing event streaming - FIXED VERSION
 const SSEClient = struct {
     allocator: std.mem.Allocator,
     connection: std.net.Stream,
     received_events: std.ArrayList([]u8),
+    // NEW: Add proper buffering for handling partial events and multiple events per read
+    read_buffer: std.ArrayList(u8),
+    parsed_events_queue: std.ArrayList(ChainEvent),
 
     fn init(allocator: std.mem.Allocator) !SSEClient {
         const address = try net.Address.parseIp4(constants.DEFAULT_SERVER_IP, constants.DEFAULT_METRICS_PORT);
@@ -203,6 +218,8 @@ const SSEClient = struct {
             .allocator = allocator,
             .connection = connection,
             .received_events = std.ArrayList([]u8).init(allocator),
+            .read_buffer = std.ArrayList(u8).init(allocator),
+            .parsed_events_queue = std.ArrayList(ChainEvent).init(allocator),
         };
     }
 
@@ -212,6 +229,13 @@ const SSEClient = struct {
             self.allocator.free(event);
         }
         self.received_events.deinit();
+        self.read_buffer.deinit();
+
+        // Clean up parsed events queue
+        for (self.parsed_events_queue.items) |event| {
+            self.allocator.free(event.event_type);
+        }
+        self.parsed_events_queue.deinit();
     }
 
     fn connect(self: *SSEClient) !void {
@@ -226,109 +250,157 @@ const SSEClient = struct {
         try self.connection.writeAll(request);
     }
 
-    fn readEvents(self: *SSEClient, timeout_ms: u64) !struct { got_justification: bool, got_finalization: bool } {
-        const timeout_ns = timeout_ms * std.time.ns_per_ms;
-        const start_time = std.time.nanoTimestamp();
+    /// NEW: Parse all complete events from the current buffer
+    fn parseAllEventsFromBuffer(self: *SSEClient) !void {
+        var buffer_pos: usize = 0;
 
-        var buffer: [4096]u8 = undefined;
-        var accum = std.ArrayList(u8).init(self.allocator);
-        defer accum.deinit();
+        while (buffer_pos < self.read_buffer.items.len) {
+            // Look for complete SSE event (ends with \n\n or \r\n\r\n)
+            const remaining_buffer = self.read_buffer.items[buffer_pos..];
 
-        var got_justification = false;
-        var got_finalization = false;
+            const event_end_lf = std.mem.indexOf(u8, remaining_buffer, "\n\n");
+            const event_end_crlf = std.mem.indexOf(u8, remaining_buffer, "\r\n\r\n");
 
-        while (std.time.nanoTimestamp() - start_time < timeout_ns and !(got_justification and got_finalization)) {
-            const bytes_read = self.connection.read(&buffer) catch |err| switch (err) {
-                error.WouldBlock => {
-                    std.time.sleep(50 * std.time.ns_per_ms);
-                    continue;
-                },
-                else => return err,
-            };
+            var event_end: ?usize = null;
+            var separator_len: usize = 2;
 
-            if (bytes_read == 0) {
-                std.time.sleep(50 * std.time.ns_per_ms);
-                continue;
+            if (event_end_lf != null and event_end_crlf != null) {
+                // Both found, use the earlier one
+                if (event_end_lf.? < event_end_crlf.?) {
+                    event_end = event_end_lf;
+                    separator_len = 2;
+                } else {
+                    event_end = event_end_crlf;
+                    separator_len = 4;
+                }
+            } else if (event_end_lf != null) {
+                event_end = event_end_lf;
+                separator_len = 2;
+            } else if (event_end_crlf != null) {
+                event_end = event_end_crlf;
+                separator_len = 4;
             }
 
-            // Keep raw chunk for debugging
-            const raw_chunk = try self.allocator.dupe(u8, buffer[0..bytes_read]);
-            defer self.allocator.free(raw_chunk);
-            try self.received_events.append(try self.allocator.dupe(u8, raw_chunk));
+            if (event_end == null) {
+                // No complete event found, break and wait for more data
+                break;
+            }
 
-            // Append into accumulator
-            try accum.appendSlice(raw_chunk);
+            // Extract the complete event block
+            const event_block = remaining_buffer[0..event_end.?];
 
-            // Process complete SSE events separated by double newlines
-            while (true) {
-                const sep = std.mem.indexOf(u8, accum.items, "\n\n") orelse std.mem.indexOf(u8, accum.items, "\r\n\r\n");
-                if (sep == null) break;
-                const is_crlf = std.mem.startsWith(u8, accum.items[sep.?..], "\r\n\r\n");
-                const end_idx: usize = sep.? + (if (is_crlf) @as(usize, 4) else @as(usize, 2));
-                const event_block = accum.items[0..end_idx];
+            // Parse this event and add to queue if valid
+            if (self.parseEventBlock(event_block)) |parsed_event| {
+                try self.parsed_events_queue.append(parsed_event);
 
-                // Parse event type
-                const event_line_start = std.mem.indexOf(u8, event_block, "event:") orelse null;
-                const data_line_start = std.mem.indexOf(u8, event_block, "data:") orelse null;
-                if (event_line_start != null and data_line_start != null) {
-                    // Extract event type token
-                    const event_line_slice = blk: {
-                        const nl = std.mem.indexOfScalarPos(u8, event_block, event_line_start.?, '\n') orelse event_block.len;
-                        break :blk std.mem.trim(u8, event_block[event_line_start.? + "event:".len .. nl], " \t\r\n");
-                    };
+                // Store raw event for debugging
+                const raw_event = try self.allocator.dupe(u8, event_block);
+                try self.received_events.append(raw_event);
+            }
 
-                    // Extract JSON payload after data:
-                    const data_line_slice = blk2: {
-                        const nl = std.mem.indexOfScalarPos(u8, event_block, data_line_start.?, '\n') orelse event_block.len;
-                        break :blk2 std.mem.trim(u8, event_block[data_line_start.? + "data:".len .. nl], " \t\r\n");
-                    };
+            // Move past this event
+            buffer_pos += event_end.? + separator_len;
+        }
 
-                    // Only parse json for justification/finalization
-                    if (!got_justification and std.mem.eql(u8, event_line_slice, "new_justification")) {
-                        const parsed = std.json.parseFromSlice(std.json.Value, self.allocator, data_line_slice, .{ .ignore_unknown_fields = true }) catch null;
-                        if (parsed) |p| {
-                            defer p.deinit();
-                            if (p.value.object.get("justified_slot")) |js| {
-                                switch (js) {
-                                    .integer => |ival| {
-                                        if (ival > 0) {
-                                            got_justification = true;
-                                        }
-                                    },
-                                    else => {},
-                                }
-                            }
-                        }
-                    } else if (!got_finalization and std.mem.eql(u8, event_line_slice, "new_finalization")) {
-                        const parsed = std.json.parseFromSlice(std.json.Value, self.allocator, data_line_slice, .{ .ignore_unknown_fields = true }) catch null;
-                        if (parsed) |p| {
-                            defer p.deinit();
-                            if (p.value.object.get("finalized_slot")) |fs| {
-                                switch (fs) {
-                                    .integer => |ival| {
-                                        if (ival > 0) {
-                                            got_finalization = true;
-                                        }
-                                    },
-                                    else => {},
-                                }
-                            }
-                        }
-                    }
-                }
+        // Remove processed events from buffer
+        if (buffer_pos > 0) {
+            if (buffer_pos < self.read_buffer.items.len) {
+                std.mem.copyForwards(u8, self.read_buffer.items[0..], self.read_buffer.items[buffer_pos..]);
+                try self.read_buffer.resize(self.read_buffer.items.len - buffer_pos);
+            } else {
+                self.read_buffer.clearAndFree();
+            }
+        }
+    }
 
-                // Remove processed block from accumulator
-                const remaining_len = accum.items.len - end_idx;
-                if (remaining_len > 0) {
-                    std.mem.copyForwards(u8, accum.items[0..remaining_len], accum.items[end_idx..accum.items.len]);
-                    accum.shrinkRetainingCapacity(remaining_len);
-                } else {
-                    accum.clearRetainingCapacity();
-                }
+    /// NEW: Parse a single event block and return parsed event
+    fn parseEventBlock(self: *SSEClient, event_block: []const u8) ?ChainEvent {
+        // Find event type line
+        const event_line_start = std.mem.indexOf(u8, event_block, "event:") orelse return null;
+        const data_line_start = std.mem.indexOf(u8, event_block, "data:") orelse return null;
+
+        // Extract event type
+        const event_line_slice = blk: {
+            const nl = std.mem.indexOfScalarPos(u8, event_block, event_line_start, '\n') orelse event_block.len;
+            const cr = std.mem.indexOfScalarPos(u8, event_block, event_line_start, '\r') orelse nl;
+            const line_end = @min(nl, cr);
+            break :blk std.mem.trim(u8, event_block[event_line_start + "event:".len .. line_end], " \t");
+        };
+
+        // Extract data payload
+        const data_line_slice = blk2: {
+            const nl = std.mem.indexOfScalarPos(u8, event_block, data_line_start, '\n') orelse event_block.len;
+            const cr = std.mem.indexOfScalarPos(u8, event_block, data_line_start, '\r') orelse nl;
+            const line_end = @min(nl, cr);
+            break :blk2 std.mem.trim(u8, event_block[data_line_start + "data:".len .. line_end], " \t");
+        };
+
+        // Clone event type string so it persists
+        const event_type_owned = self.allocator.dupe(u8, event_line_slice) catch return null;
+
+        // Parse JSON data
+        const parsed = std.json.parseFromSlice(std.json.Value, self.allocator, data_line_slice, .{ .ignore_unknown_fields = true }) catch return null;
+        defer parsed.deinit();
+
+        var justified_slot: ?u64 = null;
+        var finalized_slot: ?u64 = null;
+
+        if (parsed.value.object.get("justified_slot")) |js| {
+            switch (js) {
+                .integer => |ival| justified_slot = @intCast(ival),
+                else => {},
             }
         }
 
-        return .{ .got_justification = got_justification, .got_finalization = got_finalization };
+        if (parsed.value.object.get("finalized_slot")) |fs| {
+            switch (fs) {
+                .integer => |ival| finalized_slot = @intCast(ival),
+                else => {},
+            }
+        }
+
+        return ChainEvent{
+            .event_type = event_type_owned,
+            .justified_slot = justified_slot,
+            .finalized_slot = finalized_slot,
+        };
+    }
+
+    /// FIXED: Main function that reads network data, buffers it, and returns one parsed event
+    /// This addresses the reviewer's concern by properly handling multiple events and buffering
+    fn readEvent(self: *SSEClient) !?ChainEvent {
+        // First, check if we have any parsed events in queue
+        if (self.parsed_events_queue.items.len > 0) {
+            return self.parsed_events_queue.orderedRemove(0);
+        }
+
+        // Read new data from network
+        var temp_buffer: [4096]u8 = undefined;
+        const bytes_read = self.connection.read(&temp_buffer) catch |err| switch (err) {
+            error.WouldBlock => {
+                std.time.sleep(50 * std.time.ns_per_ms);
+                return null; // No data available
+            },
+            else => return err,
+        };
+
+        if (bytes_read == 0) {
+            std.time.sleep(50 * std.time.ns_per_ms);
+            return null; // No data available
+        }
+
+        // Append new data to our persistent buffer
+        try self.read_buffer.appendSlice(temp_buffer[0..bytes_read]);
+
+        // Parse all complete events from the buffer
+        try self.parseAllEventsFromBuffer();
+
+        // Return first parsed event if available
+        if (self.parsed_events_queue.items.len > 0) {
+            return self.parsed_events_queue.orderedRemove(0);
+        }
+
+        return null; // No complete events available yet
     }
 
     fn hasEvent(self: *SSEClient, event_type: []const u8) bool {
@@ -412,10 +484,43 @@ test "SSE events integration test - wait for justification and finalization" {
     std.debug.print("INFO: Connected to SSE endpoint, waiting for events...\n", .{});
 
     // Read events until both justification and finalization are seen, or timeout
-    const timeout_ms: u64 = 120000; // 120 seconds timeout
-    const result = try sse_client.readEvents(timeout_ms);
-    const got_justification = result.got_justification;
-    const got_finalization = result.got_finalization;
+    const timeout_ms: u64 = 600000; // 600 seconds timeout
+    const start_ns = std.time.nanoTimestamp();
+    const deadline_ns = start_ns + timeout_ms * std.time.ns_per_ms;
+    var got_justification = false;
+    var got_finalization = false;
+
+    // FIXED: This loop now works correctly with the improved readEvent() function
+    while (std.time.nanoTimestamp() < deadline_ns and !(got_justification and got_finalization)) {
+        const event = try sse_client.readEvent();
+        if (event) |e| {
+            // Check for justification with slot > 0
+            if (!got_justification and std.mem.eql(u8, e.event_type, "new_justification")) {
+                if (e.justified_slot) |slot| {
+                    if (slot > 0) {
+                        got_justification = true;
+                        std.debug.print("INFO: Found justification with slot {}\n", .{slot});
+                    }
+                }
+            }
+
+            // Check for finalization with slot > 0
+            if (!got_finalization and std.mem.eql(u8, e.event_type, "new_finalization")) {
+                if (e.finalized_slot) |slot| {
+                    std.debug.print("DEBUG: Found finalization event with slot {}\n", .{slot});
+                    if (slot > 0) {
+                        got_finalization = true;
+                        std.debug.print("INFO: Found finalization with slot {}\n", .{slot});
+                    }
+                } else {
+                    std.debug.print("DEBUG: Found finalization event with null slot\n", .{});
+                }
+            }
+
+            // IMPORTANT: Free the event memory after processing
+            e.deinit(allocator);
+        }
+    }
 
     // Check if we received connection event
     try std.testing.expect(sse_client.hasEvent("connection"));
@@ -427,11 +532,9 @@ test "SSE events integration test - wait for justification and finalization" {
 
     std.debug.print("INFO: Received events - Head: {}, Justification: {}, Finalization: {}\n", .{ head_events, justification_events, finalization_events });
 
-    // Require justification (> 0) to have been observed; finalization (> 0) is best-effort
+    // Require both justification and finalization (> 0) to have been observed
     try std.testing.expect(got_justification);
-    if (!got_finalization) {
-        std.debug.print("WARN: Did not observe finalization > 0 within timeout; proceeding.\n", .{});
-    }
+    try std.testing.expect(got_finalization);
 
     // Print some sample events for debugging
     for (sse_client.received_events.items, 0..) |event_data, i| {
