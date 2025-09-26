@@ -44,8 +44,8 @@ fn spinBeamSimNode(allocator: std.mem.Allocator, exe_path: []const u8) !*process
     cli_process.* = process.Child.init(&args, allocator);
 
     // Capture stdout and stderr for debugging
-    cli_process.stdout_behavior = .Pipe;
-    cli_process.stderr_behavior = .Pipe;
+    // cli_process.stdout_behavior = .Pipe;
+    // cli_process.stderr_behavior = .Pipe;
 
     // Start the process
     cli_process.spawn() catch |err| {
