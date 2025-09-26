@@ -46,6 +46,7 @@ fn spinBeamSimNode(allocator: std.mem.Allocator, exe_path: []const u8) !*process
     // Capture stdout and stderr for debugging
     // However this leads to test being cut short probably because of child process getting killed
     // so commenting the pipe and letting the output to flow to console
+    // TODO: figureout and fix the behavior and uncomment the following
     //
     // cli_process.stdout_behavior = .Pipe;
     // cli_process.stderr_behavior = .Pipe;
