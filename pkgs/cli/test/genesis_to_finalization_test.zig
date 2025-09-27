@@ -11,11 +11,46 @@ const NodeCommand = @import("../main.zig").NodeCommand;
 const configs = @import("@zeam/configs");
 const networks = @import("@zeam/network");
 const enr_lib = @import("enr");
+const enr = enr_lib;
 const sft = @import("@zeam/state-transition");
 const api = @import("@zeam/api");
 const api_server = @import("../api_server.zig");
 const xev = @import("xev");
 const Multiaddr = @import("multiformats").multiaddr.Multiaddr;
+
+/// Generates a test ENR with the specified IP and QUIC port
+/// Based on the genENR function from tools/src/main.zig
+fn generateTestENR(allocator: Allocator, ip: []const u8, quic_port: u16) ![]const u8 {
+    // Use a fixed test secret key for deterministic ENRs
+    const test_secret_key = "b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291";
+
+    var buffer = std.ArrayList(u8).init(allocator);
+    defer buffer.deinit();
+
+    var signable_enr = enr.SignableENR.fromSecretKeyString(test_secret_key) catch {
+        return error.ENRCreationFailed;
+    };
+
+    // Set IP address
+    const ip_addr = std.net.Ip4Address.parse(ip, 0) catch {
+        return error.InvalidIPAddress;
+    };
+    const ip_addr_bytes = std.mem.asBytes(&ip_addr.sa.addr);
+    signable_enr.set("ip", ip_addr_bytes) catch {
+        return error.ENRSetIPFailed;
+    };
+
+    // Set QUIC port
+    var quic_bytes: [2]u8 = undefined;
+    std.mem.writeInt(u16, &quic_bytes, quic_port, .big);
+    signable_enr.set("quic", &quic_bytes) catch {
+        return error.ENRSetQUICFailed;
+    };
+
+    // Write ENR to buffer
+    try enr.writeSignableENR(buffer.writer(), &signable_enr);
+    return buffer.toOwnedSlice();
+}
 
 const TestConfig = struct {
     genesis_time: u64,
@@ -67,11 +102,17 @@ pub fn generateGenesisDirectory(allocator: Allocator, config: TestConfig) !void 
     defer allocator.free(config_path);
     try cwd.writeFile(.{ .sub_path = config_path, .data = config_yaml });
 
-    // Generate nodes.yaml (array format expected by nodesFromYAML) - using valid ENRs from fixtures
-    const nodes_yaml =
-        \\- "enr:-IW4QA0pljjdLfxS_EyUxNAxJSoGCwmOVNJauYWsTiYHyWG5Bky-7yCEktSvu_w-PWUrmzbc8vYL_Mx5pgsAix2OfOMBgmlkgnY0gmlwhKwUAAGEcXVpY4IfkIlzZWNwMjU2azGhA6mw8mfwe-3TpjMMSk7GHe3cURhOn9-ufyAqy40wEyui"
-        \\- "enr:-IW4QOh370UNQipE8qYlVRK3MpT7I0hcOmrTgLO9agIxuPS2B485Se8LTQZ4Rhgo6eUuEXgMAa66Wt7lRYNHQo9zk8QBgmlkgnY0gmlwhKwUAAOEcXVpY4IfkIlzZWNwMjU2azGhA7NTxgfOmGE2EQa4HhsXxFOeHdTLYIc2MEBczymm9IUN"
-    ;
+    // Generate nodes.yaml (array format expected by nodesFromYAML) - using programmatically generated ENRs with different ports
+    const enr_0 = try generateTestENR(allocator, "192.0.2.1", 9000);
+    defer allocator.free(enr_0);
+    const enr_1 = try generateTestENR(allocator, "192.0.2.1", 9001);
+    defer allocator.free(enr_1);
+
+    const nodes_yaml = try std.fmt.allocPrint(allocator,
+        \\- "{s}"
+        \\- "{s}"
+    , .{ enr_0, enr_1 });
+    defer allocator.free(nodes_yaml);
 
     const nodes_path = try std.fmt.allocPrint(allocator, "{s}/nodes.yaml", .{config.test_dir});
     defer allocator.free(nodes_path);
@@ -175,7 +216,7 @@ fn runTwoNodesInProcessToFinalization(allocator: Allocator, config: TestConfig) 
     return try runNodesWithFinalizationMonitoring(allocator, &node_0, &node_1, config.timeout_seconds);
 }
 
-/// Runs real Nodes and monitors for finalization with proper shutdown capability
+/// Runs real Nodes and monitors for finalization
 fn runNodesWithFinalizationMonitoring(allocator: Allocator, node_0: *Node, node_1: *Node, timeout_seconds: u64) !FinalizationResult {
     _ = allocator; // Suppress unused parameter warning
 
@@ -204,10 +245,11 @@ fn runNodesWithFinalizationMonitoring(allocator: Allocator, node_0: *Node, node_
 
             std.debug.print("✅ Finalization detected at slot {d}\n", .{finalization_slot});
 
-            // Stop both nodes by detaching threads (Node.run() will continue until process ends)
+            // Give threads a moment to finish current operations, then detach
+            // This avoids the segfault by allowing network cleanup to complete
+            std.time.sleep(2000 * std.time.ns_per_ms);
             node1_thread.detach();
             node2_thread.detach();
-            std.time.sleep(1000 * std.time.ns_per_ms);
 
             return FinalizationResult{
                 .finalized = true,
@@ -224,10 +266,11 @@ fn runNodesWithFinalizationMonitoring(allocator: Allocator, node_0: *Node, node_
     // Timeout reached - properly stop Nodes
     std.debug.print("❌ Timeout reached after {d} seconds\n", .{timeout_seconds});
 
-    // Detach threads (Node.run() will continue until process ends)
+    // Give threads a moment to finish current operations, then detach
+    // This avoids the segfault by allowing network cleanup to complete
+    std.time.sleep(2000 * std.time.ns_per_ms);
     node1_thread.detach();
     node2_thread.detach();
-    std.time.sleep(1000 * std.time.ns_per_ms);
 
     return FinalizationResult{
         .finalized = false,
@@ -261,7 +304,7 @@ test "genesis_generator_two_node_finalization_sim" {
         .timeout_seconds = 300, // 5 minutes
     };
 
-    std.debug.print("🚀 Starting Genesis Generator Two-Node Finalization Test (Node Command Approach)\n", .{});
+    std.debug.print("🚀 Starting Genesis Generator Two-Node Finalization Test \n", .{});
     std.debug.print("📁 Test directory: {s}\n", .{config.test_dir});
     std.debug.print("⏰ Genesis time: {d}\n", .{config.genesis_time});
     std.debug.print("👥 Number of validators: {d}\n", .{config.num_validators});
