@@ -147,6 +147,15 @@ pub fn generateGenesisDirectory(allocator: Allocator, config: TestConfig) !void 
 fn runTwoNodesInProcessToFinalization(allocator: Allocator, config: TestConfig) !FinalizationResult {
     std.debug.print("🔄 Starting two nodes in-process to finalization using real cli.Node...\n", .{});
 
+    // Create separate allocators for each node to prevent memory sharing
+    var node0_arena = std.heap.ArenaAllocator.init(allocator);
+    defer node0_arena.deinit();
+    const node0_allocator = node0_arena.allocator();
+
+    var node1_arena = std.heap.ArenaAllocator.init(allocator);
+    defer node1_arena.deinit();
+    const node1_allocator = node1_arena.allocator();
+
     // Create logger configs for both nodes
     var logger_config1 = utils_lib.getLoggerConfig(.debug, utils_lib.FileBehaviourParams{ .fileActiveLevel = .debug, .filePath = "./log", .fileName = "zeam_0" });
     var logger_config2 = utils_lib.getLoggerConfig(.debug, utils_lib.FileBehaviourParams{ .fileActiveLevel = .debug, .filePath = "./log", .fileName = "zeam_1" });
@@ -158,9 +167,11 @@ fn runTwoNodesInProcessToFinalization(allocator: Allocator, config: TestConfig) 
         .metrics_enable = false,
         .metrics_port = 9667,
         .override_genesis_time = config.genesis_time,
-        .network_dir = try std.fmt.allocPrint(allocator, "{s}/node0", .{config.test_dir}),
+        .network_dir = try std.fmt.allocPrint(node0_allocator, "{s}/node0", .{config.test_dir}),
+        .db_path = try std.fmt.allocPrint(node0_allocator, "{s}/node0/data", .{config.test_dir}),
     };
-    defer allocator.free(node_cmd_0.network_dir);
+    defer node0_allocator.free(node_cmd_0.network_dir);
+    defer node0_allocator.free(node_cmd_0.db_path);
 
     const node_cmd_1 = NodeCommand{
         .custom_genesis = config.test_dir,
@@ -168,9 +179,11 @@ fn runTwoNodesInProcessToFinalization(allocator: Allocator, config: TestConfig) 
         .metrics_enable = false,
         .metrics_port = 9668,
         .override_genesis_time = config.genesis_time,
-        .network_dir = try std.fmt.allocPrint(allocator, "{s}/node1", .{config.test_dir}),
+        .network_dir = try std.fmt.allocPrint(node1_allocator, "{s}/node1", .{config.test_dir}),
+        .db_path = try std.fmt.allocPrint(node1_allocator, "{s}/node1/data", .{config.test_dir}),
     };
-    defer allocator.free(node_cmd_1.network_dir);
+    defer node1_allocator.free(node_cmd_1.network_dir);
+    defer node1_allocator.free(node_cmd_1.db_path);
 
     // Build start options for both nodes (like buildStartOptions does)
     var start_options_0: NodeOptions = .{
@@ -182,8 +195,9 @@ fn runTwoNodesInProcessToFinalization(allocator: Allocator, config: TestConfig) 
         .validator_indices = undefined,
         .local_priv_key = undefined,
         .logger_config = &logger_config1,
+        .database_path = node_cmd_0.db_path,
     };
-    defer start_options_0.deinit(allocator);
+    defer start_options_0.deinit(node0_allocator);
 
     var start_options_1: NodeOptions = .{
         .node_id = 1,
@@ -194,20 +208,32 @@ fn runTwoNodesInProcessToFinalization(allocator: Allocator, config: TestConfig) 
         .validator_indices = undefined,
         .local_priv_key = undefined,
         .logger_config = &logger_config2,
+        .database_path = node_cmd_1.db_path,
     };
-    defer start_options_1.deinit(allocator);
+    defer start_options_1.deinit(node1_allocator);
+
+    // Create database directories for both nodes
+    const cwd = std.fs.cwd();
+    cwd.makeDir(start_options_0.database_path) catch |err| switch (err) {
+        error.PathAlreadyExists => {}, // Directory already exists, that's fine
+        else => return err,
+    };
+    cwd.makeDir(start_options_1.database_path) catch |err| switch (err) {
+        error.PathAlreadyExists => {}, // Directory already exists, that's fine
+        else => return err,
+    };
 
     // Load configurations from genesis files
-    try node.buildStartOptions(allocator, node_cmd_0, &start_options_0);
-    try node.buildStartOptions(allocator, node_cmd_1, &start_options_1);
+    try node.buildStartOptions(node0_allocator, node_cmd_0, &start_options_0);
+    try node.buildStartOptions(node1_allocator, node_cmd_1, &start_options_1);
 
     // Create real Node instances using the same initialization as CLI
     var node_0: Node = undefined;
-    try node_0.init(allocator, &start_options_0);
+    try node_0.init(node0_allocator, &start_options_0);
     defer node_0.deinit();
 
     var node_1: Node = undefined;
-    try node_1.init(allocator, &start_options_1);
+    try node_1.init(node1_allocator, &start_options_1);
     defer node_1.deinit();
 
     std.debug.print("✅ Created two real Node instances with proper genesis loading\n", .{});
