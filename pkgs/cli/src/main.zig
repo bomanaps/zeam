@@ -41,6 +41,7 @@ pub const NodeCommand = struct {
     metrics_port: u16 = constants.DEFAULT_METRICS_PORT,
     override_genesis_time: ?u64,
     network_dir: []const u8 = "./network",
+    db_path: []const u8 = constants.DEFAULT_DB_PATH,
 
     pub const __shorts__ = .{
         .help = .h,
@@ -53,6 +54,7 @@ pub const NodeCommand = struct {
         .metrics_enable = "Enable metrics endpoint",
         .network_dir = "Directory to store network related information, e.g., peer ids, keys, etc.",
         .override_genesis_time = "Override genesis time in the config.yaml",
+        .db_path = "Path to the database directory",
         .help = "Show help information for the node command",
     };
 };
@@ -370,6 +372,7 @@ pub fn main() !void {
                 .validator_indices = undefined,
                 .local_priv_key = undefined,
                 .logger_config = &zeam_logger_config,
+                .database_path = leancmd.db_path,
             };
 
             defer start_options.deinit(allocator);

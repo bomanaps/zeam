@@ -35,6 +35,7 @@ pub const NodeOptions = struct {
     metrics_port: u16,
     local_priv_key: []const u8,
     logger_config: *LoggerConfig,
+    database_path: []const u8,
 
     pub fn deinit(self: *NodeOptions, allocator: std.mem.Allocator) void {
         for (self.bootnodes) |b| allocator.free(b);
@@ -105,7 +106,7 @@ pub const Node = struct {
         self.clock = try Clock.init(allocator, chain_config.genesis.genesis_time, &self.loop);
         errdefer self.clock.deinit(allocator);
 
-        var db = try database.Db.open(allocator, options.logger_config.logger(.database), constants.DEFAULT_DB_PATH);
+        var db = try database.Db.open(allocator, options.logger_config.logger(.database), options.database_path);
         errdefer db.deinit();
 
         self.beam_node = try BeamNode.init(allocator, .{
