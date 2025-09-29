@@ -14,6 +14,7 @@ pub fn RocksDB(comptime column_namespaces: []const ColumnNamespace) type {
         db: rocksdb.DB,
         allocator: Allocator,
         cf_handles: []const rocksdb.ColumnFamilyHandle,
+        cfs: []const rocksdb.ColumnFamily,
         // Keep this as a null terminated string to avoid issues with the RocksDB API
         // As the path gets converted to ptr before being passed to the C API binding
         path: [:0]const u8,
@@ -62,7 +63,6 @@ pub fn RocksDB(comptime column_namespaces: []const ColumnNamespace) type {
                 options,
                 column_family_descriptions,
             });
-            defer allocator.free(cfs);
 
             // allocate handle slice
             var cf_handles = try allocator.alloc(rocksdb.ColumnFamilyHandle, column_namespaces.len);
@@ -78,6 +78,7 @@ pub fn RocksDB(comptime column_namespaces: []const ColumnNamespace) type {
                 .allocator = allocator,
                 .logger = logger,
                 .cf_handles = cf_handles,
+                .cfs = cfs,
                 .path = owned_path,
             };
         }
@@ -99,6 +100,7 @@ pub fn RocksDB(comptime column_namespaces: []const ColumnNamespace) type {
 
         pub fn deinit(self: *Self) void {
             self.allocator.free(self.cf_handles);
+            self.allocator.free(self.cfs);
             self.db.deinit();
             self.allocator.free(self.path);
         }
