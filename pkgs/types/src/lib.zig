@@ -172,7 +172,7 @@ pub const BeamState = struct {
             // Copy existing justification data if available, otherwise return error
             for (validator_data, 0..) |*byte, j| {
                 const bit_index = i * num_validators + j;
-                byte.* = if (self.justifications_validators.get(bit_index)) 1 else 0;
+                byte.* = if (try self.justifications_validators.get(bit_index)) 1 else 0;
             }
             try justifications.put(allocator, blockRoot, validator_data);
         }

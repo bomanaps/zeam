@@ -263,13 +263,13 @@ test "test_with_justifications_deterministic_order" {
 
     // Check first part corresponds to votes1 (all false)
     for (0..count) |i| {
-        const vote = base_state.justifications_validators.get(i);
+        const vote = try base_state.justifications_validators.get(i);
         try std.testing.expect(!vote);
     }
 
     // Check second part corresponds to votes2 (all true)
     for (count..base_state.justifications_validators.len()) |i| {
-        const vote = base_state.justifications_validators.get(i);
+        const vote = try base_state.justifications_validators.get(i);
         try std.testing.expect(vote);
     }
 }

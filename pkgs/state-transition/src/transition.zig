@@ -180,10 +180,10 @@ fn process_attestations(allocator: Allocator, state: *types.BeamState, attestati
             return StateTransitionError.InvalidSlotIndex;
         }
 
-        const is_source_justified = state.justified_slots.get(source_slot);
-        const is_target_already_justified = state.justified_slots.get(target_slot);
-        const has_correct_source_root = std.mem.eql(u8, &vote.source.root, &state.historical_block_hashes.get(source_slot));
-        const has_correct_target_root = std.mem.eql(u8, &vote.target.root, &state.historical_block_hashes.get(target_slot));
+        const is_source_justified = try state.justified_slots.get(source_slot);
+        const is_target_already_justified = try state.justified_slots.get(target_slot);
+        const has_correct_source_root = std.mem.eql(u8, &vote.source.root, &(try state.historical_block_hashes.get(source_slot)));
+        const has_correct_target_root = std.mem.eql(u8, &vote.target.root, &(try state.historical_block_hashes.get(target_slot)));
         const target_not_ahead = target_slot <= source_slot;
         const is_target_justifiable = try is_justifiable_slot(state.latest_finalized.slot, target_slot);
 
@@ -237,7 +237,7 @@ fn process_attestations(allocator: Allocator, state: *types.BeamState, attestati
         // requring floar division, can be further optimized
         if (3 * target_justifications_count >= 2 * num_validators) {
             state.latest_justified = vote.target;
-            state.justified_slots.set(target_slot, true);
+            try state.justified_slots.set(target_slot, true);
             _ = justifications.remove(vote.target.root);
             logger.debug("\n\n\n-----------------HURRAY JUSTIFICATION ------------\n{any}\n--------------\n---------------\n-------------------------\n\n\n", .{state.latest_justified});
 
