@@ -1,24 +1,21 @@
 # Zeam Test Fixtures
 
-This directory contains pre-configured fixtures for running two zeam nodes locally that can communicate and achieve finalization.
+This guide shows how to set up and run two zeam nodes locally that can communicate and achieve finalization. You'll create your own genesis configuration with two zeam nodes (zeam_0 and zeam_1) that can achieve finalization with 3 validators total.
 
 ## Directory Structure
 
+After following the setup steps, you'll have:
+
 ```
-fixtures/
-├── README.md              # This file
-├── genisis/               # Genesis configuration for 2-node setup
-│   ├── config.yaml        # Genesis and validator settings
-│   ├── nodes.yaml         # Fixed ENRs for both nodes
-│   ├── validators.yaml    # Validator assignment (zeam_0, zeam_1)
-│   ├── node0/
-│   │   └── key           # Fixed private key for node 0
-│   └── node1/
-│       └── key           # Fixed private key for node 1
-├── config.yaml            # Alternative config (9 validators)
-├── nodes.yaml             # Alternative ENRs (3 nodes)
-├── validators.yaml        # Alternative validator assignment
-└── validator-config.yaml  # Validator generation config
+genesis/
+├── config.yaml            # Genesis and validator settings
+├── nodes.yaml             # Node ENRs for network discovery
+├── validators.yaml        # Validator assignment (zeam_0, zeam_1)
+├── validator-config.yaml  # Node configurations with private keys
+├── node0/
+│   └── key               # Private key for zeam_0
+└── node1/
+    └── key               # Private key for zeam_1
 ```
 
 ## Quick Start: Running Two Nodes
@@ -37,39 +34,115 @@ echo "Genesis time: $GENESIS_TIME"
 ### Step 1: Build the Project
 
 ```bash
+# Build the main project
 zig build -Doptimize=ReleaseFast
+
+# Build the tools for ENR generation
+zig build tools -Doptimize=ReleaseFast
 ```
 
-### Step 2: Create Data Directories
+### Step 2: Create Genesis Directory Structure
 
 ```bash
+# Create the genesis directory structure
+mkdir -p genesis/node0 genesis/node1
+
+# Create data directories for the nodes
 mkdir -p data/test_node0 data/test_node1
 ```
 
-### Step 3: Run Node 0 (Terminal 1)
+### Step 3: Generate Private Keys
+
+```bash
+# Node 0 private key (64 hex chars, no newline)
+printf "$(openssl rand -hex 32)" > genesis/node0/key
+
+# Node 1 private key
+printf "$(openssl rand -hex 32)" > genesis/node1/key
+
+# Verify they're exactly 64 characters each
+wc -c genesis/node0/key genesis/node1/key
+```
+
+### Step 4: Generate ENRs (Ethereum Node Records)
+
+```bash
+# Generate and save Node 0 ENR (listening on QUIC port 9000)
+./zig-out/bin/zeam-tools enrgen --sk $(cat genesis/node0/key) --ip 127.0.0.1 --quic 9000
+
+# Generate and save Node 1 ENR (listening on QUIC port 9001)
+./zig-out/bin/zeam-tools enrgen --sk $(cat genesis/node1/key) --ip 127.0.0.1 --quic 9001
+```
+
+### Step 5: Create Configuration Files
+
+Create `genesis/config.yaml`:
+```yaml
+# Genesis Settings
+GENESIS_TIME: 1704085200
+
+# Validator Settings  
+VALIDATOR_COUNT: 3
+```
+
+Create `genesis/nodes.yaml` (paste ENRs from Step 4):
+```yaml
+- enr:<paste_node0_enr_from_step4>
+- enr:<paste_node1_enr_from_step4>
+```
+
+Create `genesis/validators.yaml`:
+```yaml
+zeam_0:
+  - 0
+zeam_1:
+  - 1
+  - 2
+```
+
+Create `genesis/validator-config.yaml`:
+```yaml
+shuffle: roundrobin
+validators:
+  - name: "zeam_0"
+    privkey: "$(cat genesis/node0/key)"
+    enrFields:
+      ip: "127.0.0.1"
+      quic: 9000
+    count: 1
+
+  - name: "zeam_1"
+    privkey: "$(cat genesis/node1/key)"
+    enrFields:
+      ip: "127.0.0.1"
+      quic: 9001
+    count: 2
+```
+
+### Step 6: Run Node 0 (Terminal 1)
 
 Open a new terminal window and run:
 
 ```bash
 ./zig-out/bin/zeam node \
-  --custom_genesis ./pkgs/cli/src/test/fixtures/genisis \
-  --node_id 0 \
-  --network_dir ./pkgs/cli/src/test/fixtures/genisis/node0 \
+  --custom_genesis ./genesis \
+  --node_key "zeam_0" \
+  --network_dir ./data/test_node0 \
   --override_genesis_time $GENESIS_TIME \
   --db_path ./data/test_node0
 ```
 
 Replace `$GENESIS_TIME` with the actual timestamp from Step 0.
 
-### Step 4: Run Node 1 (Terminal 2)
+### Step 7: Run Node 1 (Terminal 2)
 
 Open another terminal window and run:
 
 ```bash
 ./zig-out/bin/zeam node \
-  --custom_genesis ./pkgs/cli/src/test/fixtures/genisis \
-  --node_id 1 \
-  --network_dir ./pkgs/cli/src/test/fixtures/genisis/node1 \
+  --custom_genesis ./genesis \
+  --node_key "zeam_1" \
+  --network_dir ./data/test_node1 \
   --override_genesis_time $GENESIS_TIME \
   --db_path ./data/test_node1
 ```
@@ -93,72 +166,40 @@ Latest Finalized:   Slot      9 | Root: 0xc51a79ed9a8eb78a695639e5599729...
 
 ## Configuration Details
 
-### Genesis Setup (`genisis/`)
+### Genesis Setup
 
-The `genisis/` directory contains a minimal 2-node, 3-validator setup:
+The fixtures contain a minimal 3-node, 9-validator setup:
 
 **`config.yaml`:**
-- `VALIDATOR_COUNT: 3` - Total of 3 validators
+- `VALIDATOR_COUNT: 9` - Total of 9 validators
 - `GENESIS_TIME: 1704085200` - Placeholder (overridden by `--override_genesis_time`)
 
 **`validators.yaml`:**
-- `zeam_0: [0]` - Node 0 controls validator index 0
-- `zeam_1: [1, 2]` - Node 1 controls validator indices 1 and 2
+- `zeam_0: [1, 4, 7]` - zeam_0 controls validator indices 1, 4, and 7
+- `quadrivium_0: [2, 5, 8]` - quadrivium_0 controls validator indices 2, 5, and 8  
+- `ream_0: [0, 3, 6]` - ream_0 controls validator indices 0, 3, and 6
 
-With 3 validators, we need 2/3 (2 validators) to reach finalization.
+With 9 validators, we need 2/3 (6 validators) to reach finalization.
 
 **`nodes.yaml`:**
-- Contains 2 fixed ENRs (Ethereum Node Records)
-- Node 0: QUIC port 9000, IP 127.0.0.1
-- Node 1: QUIC port 9001, IP 127.0.0.1
+- Contains ENRs (Ethereum Node Records) for network discovery
+- Used for peer discovery and connection
 
-**Private Keys (`node0/key`, `node1/key`):**
-- Fixed 64-character hex strings (no trailing newline)
-- **Node 0:** `bdf953adc161873ba026330c56450453f582e3c4ee6cb713644794bcfdd85fe5`
-- **Node 1:** `af27950128b49cda7e7bc9fcb7b0270f7a3945aa7543326f3bfdbd57d2a97a32`
+**`validator-config.yaml`:**
+- Contains node configurations with private keys
+- **zeam_0:** Private key and ENR fields for network configuration
+- **quadrivium_0:** Private key and ENR fields for network configuration
+- **ream_0:** Private key and ENR fields for network configuration
 
 ## Recreating the Fixtures
 
-If you need to recreate the `genisis/` directory from scratch, run these commands from the repository root:
+The fixtures are already configured and ready to use. The configuration files contain:
 
-```bash
-# Create directory structure
-mkdir -p pkgs/cli/src/test/fixtures/genisis/node0 pkgs/cli/src/test/fixtures/genisis/node1
+- **Pre-configured private keys** in `validator-config.yaml`
+- **Fixed ENRs** for network discovery
+- **Validator assignments** for the 9-validator setup
 
-# Create fixed private keys (64 hex chars, NO newline)
-printf "bdf953adc161873ba026330c56450453f582e3c4ee6cb713644794bcfdd85fe5" > pkgs/cli/src/test/fixtures/genisis/node0/key
-printf "af27950128b49cda7e7bc9fcb7b0270f7a3945aa7543326f3bfdbd57d2a97a32" > pkgs/cli/src/test/fixtures/genisis/node1/key
-
-# Create config.yaml
-cat > pkgs/cli/src/test/fixtures/genisis/config.yaml << 'EOF'
-# Genesis Settings
-GENESIS_TIME: 1704085200
-
-# Validator Settings  
-VALIDATOR_COUNT: 3
-EOF
-
-# Create nodes.yaml with fixed ENRs
-cat > pkgs/cli/src/test/fixtures/genisis/nodes.yaml << 'EOF'
-- enr:-IW4QCbghTYFhAE5qEfEGijkGp7e1dkqdNb_EiJFt7W0jSQxcBQ_DkoKYXW59LGfbn20GmRT-FGoSGfN58hiVS0_STaAgmlkgnY0gmlwhH8AAAGEcXVpY4IjKIlzZWNwMjU2azGhAhMMnGF1rmIPQ9tWgqfkNmvsG-aIyc9EJU5JFo3Tegys
-- enr:-IW4QHcgN6JcdQX5mHEnJqEmeDiZfXTyFsAgOjqprNP1-5cYXLELqJtcKrmMvLNkkXXMy8SOTI90oTkCVY3yIEhR-G2AgmlkgnY0gmlwhH8AAAGEcXVpY4IjKYlzZWNwMjU2azGhA5_HplOwUZ8wpF4O3g4CBsjRMI6kQYT7ph5LkeKzLgTS
-EOF
-
-# Create validators.yaml
-cat > pkgs/cli/src/test/fixtures/genisis/validators.yaml << 'EOF'
-zeam_0:
-  - 0
-zeam_1:
-  - 1
-  - 2
-EOF
-
-# Verify
-echo "=== Verification ==="
-echo "Node 0 key length: $(wc -c < pkgs/cli/src/test/fixtures/genisis/node0/key) (should be 64)"
-echo "Node 1 key length: $(wc -c < pkgs/cli/src/test/fixtures/genisis/node1/key) (should be 64)"
-ls -la pkgs/cli/src/test/fixtures/genisis/
-```
+No additional setup is required - you can start using the fixtures immediately with the commands shown above.
 
 ## Troubleshooting
 
@@ -170,14 +211,16 @@ ls -la pkgs/cli/src/test/fixtures/genisis/
 
 ### "InvalidValidatorConfig" error
 
-- Check that `validators.yaml` node names match the `node_id` parameter
+- Check that `validators.yaml` node names match the `--node_key` parameter
 - Ensure `VALIDATOR_COUNT` in `config.yaml` matches total validators in `validators.yaml`
+- Verify that the `node_key` exists in `validator-config.yaml` with a `privkey` field
 
 ### Finalization not happening
 
 - You need at least 2/3 validators voting
-- With the default setup (3 validators), both nodes must be running
+- With the default setup (9 validators), you need 6 validators to finalize
 - Check that both nodes are on the same slot number
+- Ensure the `--node_key` values match the entries in `validators.yaml`
 
 ### Clean restart
 
@@ -191,26 +234,24 @@ mkdir -p data/test_node0 data/test_node1
 
 ## Important Notes
 
-- **Fixed Configuration:** All keys, ENRs, and settings are pre-configured and fixed. No random generation needed.
+- **Pre-configured Setup:** All private keys, ENRs, and settings are pre-configured in the YAML files
 - **Same Timestamp:** Both nodes MUST use the exact same `--override_genesis_time` value
 - **Separate Terminals:** Run each node in its own terminal window to see live output
-- **Network Isolation:** This setup uses localhost (127.0.0.1) only, suitable for local testing
+- **Node Keys:** Use `--node_key` with values from `validators.yaml` (zeam_0, quadrivium_0, ream_0)
 - **Data Directories:** Each node needs its own database path to avoid conflicts
 
 ## Command Summary
 
 For quick reference, here are the commands assuming `GENESIS_TIME=1759210782`:
 
-**Terminal 1 (Node 0):**
+**Terminal 1 (zeam_0):**
 ```bash
-cd /Users/mercynaps/zeam
-./zig-out/bin/zeam node --custom_genesis ./pkgs/cli/src/test/fixtures/genisis --node_id 0 --network_dir ./pkgs/cli/src/test/fixtures/genisis/node0 --override_genesis_time 1759210782 --db_path ./data/test_node0
+./zig-out/bin/zeam node --custom_genesis ./genesis --node_key "zeam_0" --network_dir ./data/test_node0 --override_genesis_time 1759210782 --db_path ./data/test_node0
 ```
 
-**Terminal 2 (Node 1):**
+**Terminal 2 (zeam_1):**
 ```bash
-cd /Users/mercynaps/zeam
-./zig-out/bin/zeam node --custom_genesis ./pkgs/cli/src/test/fixtures/genisis --node_id 1 --network_dir ./pkgs/cli/src/test/fixtures/genisis/node1 --override_genesis_time 1759210782 --db_path ./data/test_node1
+./zig-out/bin/zeam node --custom_genesis ./genesis --node_key "zeam_1" --network_dir ./data/test_node1 --override_genesis_time 1759210782 --db_path ./data/test_node1
 ```
 
 Replace `1759210782` with your actual `GENESIS_TIME` from `date +%s`.

@@ -275,10 +275,7 @@ pub fn buildStartOptions(allocator: std.mem.Allocator, node_cmd: NodeCommand, op
     if (validator_indices.len == 0) {
         return error.InvalidValidatorConfig;
     }
-    try utils_lib.checkDIRExists(node_cmd.network_dir);
-    const local_priv_key_filepath = try std.mem.concat(allocator, u8, &[_][]const u8{ node_cmd.network_dir, "/key" });
-    defer allocator.free(local_priv_key_filepath);
-    const local_priv_key = try utils_lib.readFileToEndAlloc(allocator, local_priv_key_filepath, 512);
+    const local_priv_key = try getPrivateKeyFromValidatorConfig(allocator, opts.node_key, parsed_validator_config);
 
     opts.bootnodes = bootnodes;
     opts.validator_indices = validator_indices;
@@ -356,6 +353,21 @@ fn nodeKeyIndexFromYaml(node_key: []const u8, validator_config: Yaml) !usize {
             return index;
         }
         index += 1;
+    }
+    return error.InvalidNodeKey;
+}
+
+fn getPrivateKeyFromValidatorConfig(allocator: std.mem.Allocator, node_key: []const u8, validator_config: Yaml) ![]const u8 {
+    for (validator_config.docs.items[0].map.get("validators").?.list) |entry| {
+        const name_value = entry.map.get("name").?;
+        if (name_value == .string and std.mem.eql(u8, name_value.string, node_key)) {
+            const privkey_value = entry.map.get("privkey").?;
+            if (privkey_value == .string) {
+                return try allocator.dupe(u8, privkey_value.string);
+            } else {
+                return error.InvalidPrivateKeyFormat;
+            }
+        }
     }
     return error.InvalidNodeKey;
 }
