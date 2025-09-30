@@ -109,7 +109,7 @@ pub const Node = struct {
         errdefer db.deinit();
 
         self.beam_node = try BeamNode.init(allocator, .{
-            .nodeId = options.node_key_index,
+            .nodeId = @intCast(options.node_key_index),
             .config = chain_config,
             .anchorState = &anchorState,
             .backend = self.network.getNetworkInterface(),
@@ -351,7 +351,8 @@ fn validatorIndicesFromYAML(allocator: std.mem.Allocator, node_key: []const u8, 
 fn nodeKeyIndexFromYaml(node_key: []const u8, validator_config: Yaml) !usize {
     var index: usize = 0;
     for (validator_config.docs.items[0].map.get("validators").?.list) |entry| {
-        if (std.mem.eql(u8, entry.map.get("name").?, node_key)) {
+        const name_value = entry.map.get("name").?;
+        if (name_value == .string and std.mem.eql(u8, name_value.string, node_key)) {
             return index;
         }
         index += 1;
@@ -368,7 +369,7 @@ test "config yaml parsing" {
 
     var config2 = try utils_lib.loadFromYAMLFile(std.testing.allocator, "pkgs/cli/test/fixtures/validators.yaml");
     defer config2.deinit(std.testing.allocator);
-    const validator_indices = try validatorIndicesFromYAML(std.testing.allocator, 0, config2);
+    const validator_indices = try validatorIndicesFromYAML(std.testing.allocator, "zeam_0", config2);
     defer std.testing.allocator.free(validator_indices);
     try std.testing.expectEqual(3, validator_indices.len);
     try std.testing.expectEqual(1, validator_indices[0]);
