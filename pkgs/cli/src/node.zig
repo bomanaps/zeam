@@ -242,6 +242,8 @@ pub fn buildStartOptions(allocator: std.mem.Allocator, node_cmd: NodeCommand, op
     defer allocator.free(bootnodes_filepath);
     const validators_filepath = try std.mem.concat(allocator, u8, &[_][]const u8{ node_cmd.custom_genesis, "/validators.yaml" });
     defer allocator.free(validators_filepath);
+    const validator_config_filepath = try std.mem.concat(allocator, u8, &[_][]const u8{ node_cmd.custom_genesis, "/validator-config.yaml" });
+    defer allocator.free(validator_config_filepath);
     // TODO: support genesis file loading when ssz library supports it
     // const genesis_filepath = try std.mem.concat(allocator, &[_][]const u8{custom_genesis, "/genesis.ssz"});
     // defer allocator.free(genesis_filepath);
@@ -254,6 +256,9 @@ pub fn buildStartOptions(allocator: std.mem.Allocator, node_cmd: NodeCommand, op
 
     var parsed_validators = try utils_lib.loadFromYAMLFile(allocator, validators_filepath);
     defer parsed_validators.deinit(allocator);
+
+    var parsed_validator_config = try utils_lib.loadFromYAMLFile(allocator, validator_config_filepath);
+    defer parsed_validator_config.deinit(allocator);
 
     const bootnodes = try nodesFromYAML(allocator, parsed_bootnodes);
     errdefer {
@@ -279,7 +284,7 @@ pub fn buildStartOptions(allocator: std.mem.Allocator, node_cmd: NodeCommand, op
     opts.validator_indices = validator_indices;
     opts.local_priv_key = local_priv_key;
     opts.genesis_spec = genesis_spec;
-    opts.node_key_index = try nodeKeyIndexFromYaml(opts.node_key, parsed_validators);
+    opts.node_key_index = try nodeKeyIndexFromYaml(opts.node_key, parsed_validator_config);
 }
 
 /// Parses the nodes from a YAML configuration.
@@ -318,21 +323,35 @@ fn nodesFromYAML(allocator: std.mem.Allocator, nodes_config: Yaml) ![]const []co
 /// ```
 /// where `node_{node_id}` is the key for the node's validator indices.
 /// Returns a set of validator indices. The caller is responsible for freeing the returned slice.
-fn validatorIndicesFromYAML(allocator: std.mem.Allocator, node_key: []const u8, validators_config: Yaml) ![]usize {
+fn validatorIndicesFromYAML(allocator: std.mem.Allocator, node_key: []const u8, validators: Yaml) ![]usize {
     var validator_indices: std.ArrayListUnmanaged(usize) = .empty;
     defer validator_indices.deinit(allocator);
 
-    for (validators_config.docs.items[0].map.get(node_key).?.list) |item| {
+    for (validators.docs.items[0].map.get(node_key).?.list) |item| {
         try validator_indices.append(allocator, @intCast(item.int));
     }
     return try validator_indices.toOwnedSlice(allocator);
 }
 
-fn nodeKeyIndexFromYaml(node_key: []const u8, validators_config: Yaml) !usize {
-    var iterator = validators_config.docs.items[0].map.iterator();
+// Parses the index for a given node key from a YAML configuration.
+// ```yaml
+// shuffle: roundrobin
+// validators:
+//   - name: "zeam_0"
+//     # node id 7d0904dc6d8d7130e0e68d5d3175d0c3cf470f8725f67bd8320882f5b9753cc0
+//     # peer id 16Uiu2HAkvi2sxT75Bpq1c7yV2FjnSQJJ432d6jeshbmfdJss1i6f
+//     privkey: "bdf953adc161873ba026330c56450453f582e3c4ee6cb713644794bcfdd85fe5"
+//     enrFields:
+//       # verify /ip4/127.0.0.1/udp/9000/quic-v1/p2p/16Uiu2HAkvi2sxT75Bpq1c7yV2FjnSQJJ432d6jeshbmfdJss1i6f
+//       ip: "127.0.0.1"
+//       quic: 9000
+//     count: 1 # number of indices for this node
+//```
+
+fn nodeKeyIndexFromYaml(node_key: []const u8, validator_config: Yaml) !usize {
     var index: usize = 0;
-    for (iterator.next()) |entry| {
-        if (std.mem.eql(u8, entry.key, node_key)) {
+    for (validator_config.docs.items[0].map.get("validators").?.list) |entry| {
+        if (std.mem.eql(u8, entry.get("name").?, node_key)) {
             return index;
         }
         index += 1;
