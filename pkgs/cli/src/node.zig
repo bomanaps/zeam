@@ -189,8 +189,7 @@ pub const Node = struct {
     }
 
     fn constructMultiaddrs(self: *Self) !struct { listen_addresses: []const Multiaddr, connect_peers: []const Multiaddr } {
-        const self_node_index = self.options.validator_indices[0];
-        try ENR.decodeTxtInto(&self.enr, self.options.bootnodes[self_node_index]);
+        try ENR.decodeTxtInto(&self.enr, self.options.bootnodes[self.options.node_key_index]);
 
         // Overriding the IP to 0.0.0.0 to listen on all interfaces
         try self.enr.kvs.put("ip", "\x00\x00\x00\x00");
