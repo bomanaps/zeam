@@ -24,5 +24,5 @@ for item in "${spin_nodes[@]}"; do
   fi;
 
   echo "$execCmd"
-  eval "$execCmd"
+  eval "$execCmd" &
 done;
