@@ -1,22 +1,13 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const node_lib = @import("@zeam/node");
-const BeamNode = node_lib.BeamNode;
-const Clock = node_lib.Clock;
-const utils_lib = @import("@zeam/utils");
-const cli = @import("@zeam/cli");
-const Node = cli.Node;
-const NodeOptions = cli.NodeOptions;
-const NodeCommand = cli.NodeCommand;
-const configs = @import("@zeam/configs");
-const networks = @import("@zeam/network");
+const process = std.process;
+const net = std.net;
+const build_options = @import("build_options");
 const enr_lib = @import("enr");
 const enr = enr_lib;
-const sft = @import("@zeam/state-transition");
-const api = @import("@zeam/api");
-const api_server = cli.api_server;
-const xev = @import("xev");
-const Multiaddr = @import("multiformats").multiaddr.Multiaddr;
+const beam_test = @import("beam_integration_test.zig");
+const SSEClient = beam_test.SSEClient;
+const ChainEvent = beam_test.ChainEvent;
 
 /// Generates a test ENR with the specified IP and QUIC port
 /// Based on the genENR function from tools/src/main.zig
@@ -102,10 +93,10 @@ pub fn generateGenesisDirectory(allocator: Allocator, config: TestConfig) !void 
     defer allocator.free(config_path);
     try cwd.writeFile(.{ .sub_path = config_path, .data = config_yaml });
 
-    // Generate nodes.yaml (array format expected by nodesFromYAML) - using programmatically generated ENRs with different ports
-    const enr_0 = try generateTestENR(allocator, "192.0.2.1", 9000);
+    // Generate nodes.yaml (array format expected by nodesFromYAML) - using programmatically generated ENRs with localhost and different ports
+    const enr_0 = try generateTestENR(allocator, "127.0.0.1", 9000);
     defer allocator.free(enr_0);
-    const enr_1 = try generateTestENR(allocator, "192.0.2.1", 9001);
+    const enr_1 = try generateTestENR(allocator, "127.0.0.1", 9001);
     defer allocator.free(enr_1);
 
     const nodes_yaml = try std.fmt.allocPrint(allocator,
@@ -132,178 +123,232 @@ pub fn generateGenesisDirectory(allocator: Allocator, config: TestConfig) !void 
     try cwd.writeFile(.{ .sub_path = validators_path, .data = validators_yaml });
 
     // Generate network keys for each node (required by buildStartOptions)
-    const key_content = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+    // Each node needs a DIFFERENT private key to have a different PeerID in libp2p
+    // Using different valid 32-byte (64 hex char) keys for each node
+    const key0_content = "0000000000000000000000000000000000000000000000000000000000000001";
+    const key1_content = "0000000000000000000000000000000000000000000000000000000000000002";
 
     const key0_path = try std.fmt.allocPrint(allocator, "{s}/key", .{node0_dir});
     defer allocator.free(key0_path);
-    try cwd.writeFile(.{ .sub_path = key0_path, .data = key_content });
+    try cwd.writeFile(.{ .sub_path = key0_path, .data = key0_content });
 
     const key1_path = try std.fmt.allocPrint(allocator, "{s}/key", .{node1_dir});
     defer allocator.free(key1_path);
-    try cwd.writeFile(.{ .sub_path = key1_path, .data = key_content });
+    try cwd.writeFile(.{ .sub_path = key1_path, .data = key1_content });
 }
 
-/// Runs two nodes in-process to finalization using real cli.Node
-fn runTwoNodesInProcessToFinalization(allocator: Allocator, config: TestConfig) !FinalizationResult {
-    std.debug.print("🔄 Starting two nodes in-process to finalization using real cli.Node...\n", .{});
+/// Helper to spawn a zeam node process
+fn spawnZeamNodeProcess(
+    allocator: Allocator,
+    node_id: u32,
+    config: TestConfig,
+    metrics_port: u16,
+) !*process.Child {
+    std.debug.print("🔧 Preparing to spawn node {d}...\n", .{node_id});
 
-    // Create separate allocators for each node to prevent memory sharing
-    var node0_arena = std.heap.ArenaAllocator.init(allocator);
-    defer node0_arena.deinit();
-    const node0_allocator = node0_arena.allocator();
+    const exe_path = build_options.cli_exe_path;
+    std.debug.print("📦 Executable path: {s}\n", .{exe_path});
 
-    var node1_arena = std.heap.ArenaAllocator.init(allocator);
-    defer node1_arena.deinit();
-    const node1_allocator = node1_arena.allocator();
+    const network_dir = try std.fmt.allocPrint(allocator, "{s}/node{d}", .{ config.test_dir, node_id });
+    defer allocator.free(network_dir);
 
-    // Create logger configs for both nodes
-    var logger_config1 = utils_lib.getLoggerConfig(.debug, utils_lib.FileBehaviourParams{ .fileActiveLevel = .debug, .filePath = "./log", .fileName = "zeam_0" });
-    var logger_config2 = utils_lib.getLoggerConfig(.debug, utils_lib.FileBehaviourParams{ .fileActiveLevel = .debug, .filePath = "./log", .fileName = "zeam_1" });
+    const db_path = try std.fmt.allocPrint(allocator, "{s}/node{d}/data", .{ config.test_dir, node_id });
+    defer allocator.free(db_path);
 
-    // Create NodeCommand configurations for both nodes (like CLI args)
-    const node_cmd_0 = NodeCommand{
-        .custom_genesis = config.test_dir,
-        .node_id = 0,
-        .metrics_enable = false,
-        .metrics_port = 9667,
-        .override_genesis_time = config.genesis_time,
-        .network_dir = try std.fmt.allocPrint(node0_allocator, "{s}/node0", .{config.test_dir}),
-        .db_path = try std.fmt.allocPrint(node0_allocator, "{s}/node0/data", .{config.test_dir}),
-    };
-    defer node0_allocator.free(node_cmd_0.network_dir);
-    defer node0_allocator.free(node_cmd_0.db_path);
+    const node_id_str = try std.fmt.allocPrint(allocator, "{d}", .{node_id});
+    defer allocator.free(node_id_str);
 
-    const node_cmd_1 = NodeCommand{
-        .custom_genesis = config.test_dir,
-        .node_id = 1,
-        .metrics_enable = false,
-        .metrics_port = 9668,
-        .override_genesis_time = config.genesis_time,
-        .network_dir = try std.fmt.allocPrint(node1_allocator, "{s}/node1", .{config.test_dir}),
-        .db_path = try std.fmt.allocPrint(node1_allocator, "{s}/node1/data", .{config.test_dir}),
-    };
-    defer node1_allocator.free(node_cmd_1.network_dir);
-    defer node1_allocator.free(node_cmd_1.db_path);
+    const metrics_port_str = try std.fmt.allocPrint(allocator, "{d}", .{metrics_port});
+    defer allocator.free(metrics_port_str);
 
-    // Build start options for both nodes (like buildStartOptions does)
-    var start_options_0: NodeOptions = .{
-        .node_id = 0,
-        .metrics_enable = false,
-        .metrics_port = 9667,
-        .bootnodes = undefined,
-        .genesis_spec = undefined,
-        .validator_indices = undefined,
-        .local_priv_key = undefined,
-        .logger_config = &logger_config1,
-        .database_path = node_cmd_0.db_path,
-    };
-    defer start_options_0.deinit(node0_allocator);
+    const genesis_time_str = try std.fmt.allocPrint(allocator, "{d}", .{config.genesis_time});
+    defer allocator.free(genesis_time_str);
 
-    var start_options_1: NodeOptions = .{
-        .node_id = 1,
-        .metrics_enable = false,
-        .metrics_port = 9668,
-        .bootnodes = undefined,
-        .genesis_spec = undefined,
-        .validator_indices = undefined,
-        .local_priv_key = undefined,
-        .logger_config = &logger_config2,
-        .database_path = node_cmd_1.db_path,
-    };
-    defer start_options_1.deinit(node1_allocator);
-
-    // Create database directories for both nodes
+    // Create database directory
     const cwd = std.fs.cwd();
-    cwd.makeDir(start_options_0.database_path) catch |err| switch (err) {
-        error.PathAlreadyExists => {}, // Directory already exists, that's fine
-        else => return err,
-    };
-    cwd.makeDir(start_options_1.database_path) catch |err| switch (err) {
-        error.PathAlreadyExists => {}, // Directory already exists, that's fine
+    cwd.makeDir(db_path) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
         else => return err,
     };
 
-    // Load configurations from genesis files
-    try cli.buildStartOptions(node0_allocator, node_cmd_0, &start_options_0);
-    try cli.buildStartOptions(node1_allocator, node_cmd_1, &start_options_1);
+    const args = &[_][]const u8{
+        exe_path,
+        "node",
+        "--custom_genesis",
+        config.test_dir,
+        "--node_id",
+        node_id_str,
+        "--override_genesis_time",
+        genesis_time_str,
+        "--metrics_enable",
+        "--metrics_port",
+        metrics_port_str,
+        "--network_dir",
+        network_dir,
+        "--db_path",
+        db_path,
+    };
 
-    // Create real Node instances using the same initialization as CLI
-    var node_0: Node = undefined;
-    try node_0.init(node0_allocator, &start_options_0);
-    defer node_0.deinit();
+    // Debug: Print the command
+    std.debug.print("📋 Command for node {d}: {s} {s}", .{ node_id, exe_path, args[1] });
+    for (args[2..]) |arg| {
+        std.debug.print(" {s}", .{arg});
+    }
+    std.debug.print("\n", .{});
 
-    var node_1: Node = undefined;
-    try node_1.init(node1_allocator, &start_options_1);
-    defer node_1.deinit();
+    const cli_process = try allocator.create(process.Child);
+    cli_process.* = process.Child.init(args, allocator);
 
-    std.debug.print("✅ Created two real Node instances with proper genesis loading\n", .{});
+    std.debug.print("🚀 Spawning node {d} process...\n", .{node_id});
 
-    // Run nodes and monitor for finalization
-    return try runNodesWithFinalizationMonitoring(allocator, &node_0, &node_1, config.timeout_seconds);
+    // Spawn the process
+    cli_process.spawn() catch |err| {
+        std.debug.print("❌ ERROR: Failed to spawn node {d} process: {}\n", .{ node_id, err });
+        allocator.destroy(cli_process);
+        return err;
+    };
+
+    std.debug.print("✅ Spawned node {d} process successfully\n", .{node_id});
+    return cli_process;
 }
 
-/// Runs real Nodes and monitors for finalization
-fn runNodesWithFinalizationMonitoring(allocator: Allocator, node_0: *Node, node_1: *Node, timeout_seconds: u64) !FinalizationResult {
-    _ = allocator; // Suppress unused parameter warning
+/// Wait for node startup by checking metrics endpoint
+fn waitForNodeStartup(metrics_port: u16, timeout_seconds: u64) !void {
+    std.debug.print("⏳ Waiting for node on port {d} to start (timeout: {d}s)...\n", .{ metrics_port, timeout_seconds });
 
-    // Create timeout timer
-    var timeout_timer = try std.time.Timer.start();
-    const timeout_ns = timeout_seconds * std.time.ns_per_s;
+    const start_time = std.time.milliTimestamp();
+    const timeout_ms = timeout_seconds * 1000;
+    var attempt: usize = 0;
 
-    std.debug.print("🔄 Starting real Nodes and monitoring for finalization...\n", .{});
-
-    // Start nodes in separate threads using Node.run()
-    const node1_thread = try std.Thread.spawn(.{}, Node.run, .{node_0});
-    const node2_thread = try std.Thread.spawn(.{}, Node.run, .{node_1});
-
-    // Give nodes time to initialize
-    std.time.sleep(1000 * std.time.ns_per_ms);
-
-    // Monitor for finalization by accessing the underlying beam_node
-    while (timeout_timer.read() < timeout_ns) {
-        // Check finalization state from both nodes' underlying beam nodes
-        const node1_finalized = node_0.beam_node.chain.forkChoice.fcStore.latest_finalized.slot > 0;
-        const node2_finalized = node_1.beam_node.chain.forkChoice.fcStore.latest_finalized.slot > 0;
-
-        if (node1_finalized or node2_finalized) {
-            const finalization_slot = if (node1_finalized) node_0.beam_node.chain.forkChoice.fcStore.latest_finalized.slot else node_1.beam_node.chain.forkChoice.fcStore.latest_finalized.slot;
-            const finalization_root = if (node1_finalized) node_0.beam_node.chain.forkChoice.fcStore.latest_finalized.root else node_1.beam_node.chain.forkChoice.fcStore.latest_finalized.root;
-
-            std.debug.print("✅ Finalization detected at slot {d}\n", .{finalization_slot});
-
-            // Give threads a moment to finish current operations, then detach
-            // This avoids the segfault by allowing network cleanup to complete
-            std.time.sleep(2000 * std.time.ns_per_ms);
-            node1_thread.detach();
-            node2_thread.detach();
-
-            return FinalizationResult{
-                .finalized = true,
-                .finalization_slot = finalization_slot,
-                .finalization_root = finalization_root,
-                .timeout_reached = false,
-            };
+    while (std.time.milliTimestamp() - start_time < timeout_ms) {
+        attempt += 1;
+        if (attempt % 10 == 0) {
+            const elapsed = @divTrunc(std.time.milliTimestamp() - start_time, 1000);
+            std.debug.print("⏱️  Still waiting for port {d}... ({d}s elapsed, attempt {d})\n", .{ metrics_port, elapsed, attempt });
         }
+        const address = net.Address.parseIp4("127.0.0.1", metrics_port) catch {
+            std.time.sleep(1000 * std.time.ns_per_ms);
+            continue;
+        };
 
-        // Small sleep to prevent busy waiting
-        std.time.sleep(100 * std.time.ns_per_ms);
+        var connection = net.tcpConnectToAddress(address) catch {
+            std.time.sleep(1000 * std.time.ns_per_ms);
+            continue;
+        };
+        connection.close();
+
+        std.debug.print("✅ Node on port {d} is ready\n", .{metrics_port});
+        return;
     }
 
-    // Timeout reached - properly stop Nodes
+    return error.NodeStartupTimeout;
+}
+
+/// Monitor SSE events for finalization using the working SSEClient
+fn monitorForFinalization(allocator: Allocator, metrics_port: u16, timeout_seconds: u64) !FinalizationResult {
+    std.debug.print("📡 Creating SSE client for port {d}...\n", .{metrics_port});
+
+    // Create SSE client using the proven implementation
+    var sse_client = try SSEClient.init(allocator, metrics_port);
+    defer sse_client.deinit();
+
+    // Connect to SSE endpoint
+    try sse_client.connect();
+    std.debug.print("✅ Connected to SSE endpoint, waiting for finalization events...\n", .{});
+
+    // Monitor for finalization
+    const deadline_ns = std.time.nanoTimestamp() + (@as(i64, @intCast(timeout_seconds)) * std.time.ns_per_s);
+    var event_count: usize = 0;
+
+    while (std.time.nanoTimestamp() < deadline_ns) {
+        const event = try sse_client.readEvent();
+        if (event) |e| {
+            event_count += 1;
+            std.debug.print("📨 Event #{d}: {s}\n", .{ event_count, e.event_type });
+
+            // Check for finalization with slot > 0
+            if (std.mem.eql(u8, e.event_type, "new_finalization")) {
+                if (e.finalized_slot) |slot| {
+                    std.debug.print("🔍 Found finalization event with slot {d}\n", .{slot});
+                    if (slot > 0) {
+                        std.debug.print("🎉 Finalization detected at slot {d}!\n", .{slot});
+                        e.deinit(allocator);
+                        return FinalizationResult{
+                            .finalized = true,
+                            .finalization_slot = slot,
+                            .finalization_root = [_]u8{0} ** 32,
+                            .timeout_reached = false,
+                        };
+                    }
+                }
+            }
+
+            // Free the event memory
+            e.deinit(allocator);
+        }
+    }
+
     std.debug.print("❌ Timeout reached after {d} seconds\n", .{timeout_seconds});
-
-    // Give threads a moment to finish current operations, then detach
-    // This avoids the segfault by allowing network cleanup to complete
-    std.time.sleep(2000 * std.time.ns_per_ms);
-    node1_thread.detach();
-    node2_thread.detach();
-
+    std.debug.print("📊 Total events received: {d}\n", .{event_count});
     return FinalizationResult{
         .finalized = false,
         .finalization_slot = 0,
         .finalization_root = [_]u8{0} ** 32,
         .timeout_reached = true,
     };
+}
+
+/// Runs two nodes as separate processes to finalization
+fn runTwoNodesAsProcessesToFinalization(allocator: Allocator, config: TestConfig) !FinalizationResult {
+    std.debug.print("\n", .{});
+    std.debug.print("═══════════════════════════════════════════════════════════\n", .{});
+    std.debug.print("🚀 STARTING TWO-NODE PROCESS TEST\n", .{});
+    std.debug.print("═══════════════════════════════════════════════════════════\n", .{});
+    std.debug.print("Test config: genesis_time={d}, num_validators={d}, timeout={d}s\n", .{ config.genesis_time, config.num_validators, config.timeout_seconds });
+    std.debug.print("\n", .{});
+
+    // Use ports 9669 and 9670 to avoid conflicts with beam_integration_test (which uses 9667/9668)
+    const node_0_port: u16 = 9669;
+    const node_1_port: u16 = 9670;
+
+    // Spawn node 0
+    std.debug.print("▶️  STEP 1: Spawning Node 0 (port {d})\n", .{node_0_port});
+    const node_0_process = try spawnZeamNodeProcess(allocator, 0, config, node_0_port);
+    defer {
+        _ = node_0_process.kill() catch {};
+        _ = node_0_process.wait() catch {};
+        allocator.destroy(node_0_process);
+    }
+
+    // Spawn node 1
+    std.debug.print("\n▶️  STEP 2: Spawning Node 1 (port {d})\n", .{node_1_port});
+    const node_1_process = try spawnZeamNodeProcess(allocator, 1, config, node_1_port);
+    defer {
+        std.debug.print("🧹 Cleaning up node 1 process...\n", .{});
+        _ = node_1_process.kill() catch {};
+        _ = node_1_process.wait() catch {};
+        allocator.destroy(node_1_process);
+    }
+
+    std.debug.print("\n✅ Both node processes spawned\n", .{});
+
+    // Wait for both nodes to start (check metrics endpoints)
+    std.debug.print("\n▶️  STEP 3: Waiting for nodes to start (60s timeout each)...\n", .{});
+    try waitForNodeStartup(node_0_port, 60); // 60 second startup timeout
+    try waitForNodeStartup(node_1_port, 60);
+
+    std.debug.print("\n✅ Both nodes are ready!\n", .{});
+
+    // Monitor node 0 for finalization via SSE
+    std.debug.print("\n▶️  STEP 4: Monitoring for finalization via SSE (timeout: {d}s)...\n", .{config.timeout_seconds});
+    const result = try monitorForFinalization(allocator, node_0_port, config.timeout_seconds);
+
+    std.debug.print("\n", .{});
+    std.debug.print("═══════════════════════════════════════════════════════════\n", .{});
+    std.debug.print("🏁 TEST COMPLETE - Finalized: {}\n", .{result.finalized});
+    std.debug.print("═══════════════════════════════════════════════════════════\n", .{});
+
+    return result;
 }
 
 /// Cleans up genesis directory and all subdirectories
@@ -325,7 +370,7 @@ test "genesis_generator_two_node_finalization_sim" {
     // Configuration for the test
     const config = TestConfig{
         .genesis_time = @as(u64, @intCast(std.time.timestamp())),
-        .num_validators = 3,
+        .num_validators = 2, // 2 validators (one per node) - ensures every slot has a proposer
         .test_dir = "test_genesis_two_nodes",
         .timeout_seconds = 300, // 5 minutes
     };
@@ -347,8 +392,8 @@ test "genesis_generator_two_node_finalization_sim" {
     try generateGenesisDirectory(allocator, config);
     std.debug.print("✅ Generated proper genesis directory structure\n", .{});
 
-    // Run two nodes in-process to finalization (using Node command approach)
-    const result = try runTwoNodesInProcessToFinalization(allocator, config);
+    // Run two nodes as separate processes to finalization
+    const result = try runTwoNodesAsProcessesToFinalization(allocator, config);
 
     // Clean up genesis directory
     try cleanupGenesisDirectory(allocator, config.test_dir);
