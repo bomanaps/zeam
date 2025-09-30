@@ -195,19 +195,19 @@ const ZeamRequest = struct {
 };
 
 /// Parsed SSE Event structure
-const ChainEvent = struct {
+pub const ChainEvent = struct {
     event_type: []const u8,
     justified_slot: ?u64,
     finalized_slot: ?u64,
 
     /// Free the memory allocated for this event
-    fn deinit(self: ChainEvent, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: ChainEvent, allocator: std.mem.Allocator) void {
         allocator.free(self.event_type);
     }
 };
 
 /// SSE Client for testing event streaming - FIXED VERSION
-const SSEClient = struct {
+pub const SSEClient = struct {
     allocator: std.mem.Allocator,
     connection: std.net.Stream,
     received_events: std.ArrayList([]u8),
@@ -215,8 +215,8 @@ const SSEClient = struct {
     read_buffer: std.ArrayList(u8),
     parsed_events_queue: std.ArrayList(ChainEvent),
 
-    fn init(allocator: std.mem.Allocator) !SSEClient {
-        const address = try net.Address.parseIp4(constants.DEFAULT_SERVER_IP, constants.DEFAULT_METRICS_PORT);
+    pub fn init(allocator: std.mem.Allocator, metrics_port: u16) !SSEClient {
+        const address = try net.Address.parseIp4(constants.DEFAULT_SERVER_IP, metrics_port);
         const connection = try net.tcpConnectToAddress(address);
 
         return SSEClient{
@@ -228,7 +228,7 @@ const SSEClient = struct {
         };
     }
 
-    fn deinit(self: *SSEClient) void {
+    pub fn deinit(self: *SSEClient) void {
         self.connection.close();
         for (self.received_events.items) |event| {
             self.allocator.free(event);
@@ -243,7 +243,7 @@ const SSEClient = struct {
         self.parsed_events_queue.deinit();
     }
 
-    fn connect(self: *SSEClient) !void {
+    pub fn connect(self: *SSEClient) !void {
         // Send SSE request
         const request = "GET /events HTTP/1.1\r\n" ++
             "Host: 127.0.0.1:9667\r\n" ++
@@ -373,7 +373,7 @@ const SSEClient = struct {
 
     /// FIXED: Main function that reads network data, buffers it, and returns one parsed event
     /// This addresses the reviewer's concern by properly handling multiple events and buffering
-    fn readEvent(self: *SSEClient) !?ChainEvent {
+    pub fn readEvent(self: *SSEClient) !?ChainEvent {
         // First, check if we have any parsed events in queue
         if (self.parsed_events_queue.items.len > 0) {
             return self.parsed_events_queue.orderedRemove(0);
@@ -480,7 +480,7 @@ test "SSE events integration test - wait for justification and finalization" {
     waitForNodeStart();
 
     // Create SSE client
-    var sse_client = try SSEClient.init(allocator);
+    var sse_client = try SSEClient.init(allocator, constants.DEFAULT_METRICS_PORT);
     defer sse_client.deinit();
 
     // Connect to SSE endpoint
