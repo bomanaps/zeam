@@ -27,7 +27,8 @@ const database = @import("@zeam/database");
 const prefix = "zeam_";
 
 pub const NodeOptions = struct {
-    node_id: u32,
+    network_id: u32,
+    node_key: []const u8,
     bootnodes: []const []const u8,
     validator_indices: []usize,
     genesis_spec: types.GenesisSpec,
@@ -64,8 +65,6 @@ pub const Node = struct {
         self.allocator = allocator;
         self.options = options;
 
-        const node_id = options.node_id;
-
         if (options.metrics_enable) {
             try api.init(allocator);
             try api_server.startAPIServer(allocator, options.metrics_port);
@@ -95,7 +94,7 @@ pub const Node = struct {
         const addresses = try self.constructMultiaddrs();
 
         self.network = try networks.EthLibp2p.init(allocator, &self.loop, .{
-            .networkId = 0,
+            .networkId = options.network_id,
             .network_name = chain_config.spec.name,
             .listen_addresses = addresses.listen_addresses,
             .connect_peers = addresses.connect_peers,
@@ -109,8 +108,7 @@ pub const Node = struct {
         errdefer db.deinit();
 
         self.beam_node = try BeamNode.init(allocator, .{
-            // options
-            .nodeId = node_id,
+            .nodeId = options.node_key_index,
             .config = chain_config,
             .anchorState = &anchorState,
             .backend = self.network.getNetworkInterface(),
@@ -267,7 +265,7 @@ pub fn buildStartOptions(allocator: std.mem.Allocator, node_cmd: NodeCommand, op
     }
     const genesis_spec = try configs.genesisConfigFromYAML(parsed_config, node_cmd.override_genesis_time);
 
-    const validator_indices = try validatorIndicesFromYAML(allocator, opts.node_id, parsed_validators);
+    const validator_indices = try validatorIndicesFromYAML(allocator, opts.node_key, parsed_validators);
     errdefer allocator.free(validator_indices);
     if (validator_indices.len == 0) {
         return error.InvalidValidatorConfig;
@@ -281,6 +279,7 @@ pub fn buildStartOptions(allocator: std.mem.Allocator, node_cmd: NodeCommand, op
     opts.validator_indices = validator_indices;
     opts.local_priv_key = local_priv_key;
     opts.genesis_spec = genesis_spec;
+    opts.node_key_index = try nodeKeyIndexFromYaml(opts.node_key, parsed_validators);
 }
 
 /// Parses the nodes from a YAML configuration.
@@ -319,16 +318,26 @@ fn nodesFromYAML(allocator: std.mem.Allocator, nodes_config: Yaml) ![]const []co
 /// ```
 /// where `node_{node_id}` is the key for the node's validator indices.
 /// Returns a set of validator indices. The caller is responsible for freeing the returned slice.
-fn validatorIndicesFromYAML(allocator: std.mem.Allocator, node_id: u32, validators_config: Yaml) ![]usize {
+fn validatorIndicesFromYAML(allocator: std.mem.Allocator, node_key: []const u8, validators_config: Yaml) ![]usize {
     var validator_indices: std.ArrayListUnmanaged(usize) = .empty;
     defer validator_indices.deinit(allocator);
 
-    var node_key_buf: [prefix.len + 4]u8 = undefined;
-    const node_key = try std.fmt.bufPrint(&node_key_buf, "{s}{d}", .{ prefix, node_id });
     for (validators_config.docs.items[0].map.get(node_key).?.list) |item| {
         try validator_indices.append(allocator, @intCast(item.int));
     }
     return try validator_indices.toOwnedSlice(allocator);
+}
+
+fn nodeKeyIndexFromYaml(node_key: []const u8, validators_config: Yaml) !usize {
+    var iterator = validators_config.docs.items[0].map.iterator();
+    var index: usize = 0;
+    for (iterator.next()) |entry| {
+        if (std.mem.eql(u8, entry.key, node_key)) {
+            return index;
+        }
+        index += 1;
+    }
+    return error.InvalidNodeKey;
 }
 
 test "config yaml parsing" {

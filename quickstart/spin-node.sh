@@ -15,7 +15,8 @@ for item in "${spin_nodes[@]}"; do
   execCmd="../zig-out/bin/zeam node \
   --custom_genesis $configDir \
   --network_dir $configDir/$item \
-  --db_path $dataDir/$item"
+  --db_path $dataDir/$item \
+  --node_key $item"
 
   if [ ! -n "$inTerminal" ]
   then
@@ -23,5 +24,5 @@ for item in "${spin_nodes[@]}"; do
   fi;
 
   echo "$execCmd"
-  eval "$execCmd" &
+  eval "$execCmd"
 done;

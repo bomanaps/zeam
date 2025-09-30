@@ -36,7 +36,10 @@ const enr_lib = @import("enr");
 pub const NodeCommand = struct {
     help: bool = false,
     custom_genesis: []const u8,
-    node_id: u32 = 0,
+    // internal libp2p network id, only matters when two or more nodes are run in same process
+    network_id: u32 = 0,
+    // the node key in validators.yaml
+    node_key: []const u8,
     metrics_enable: bool = false,
     metrics_port: u16 = constants.DEFAULT_METRICS_PORT,
     override_genesis_time: ?u64,
@@ -49,7 +52,8 @@ pub const NodeCommand = struct {
 
     pub const __messages__ = .{
         .custom_genesis = "Custom genesis directory path",
-        .node_id = "Node id for this lean node",
+        .network_id = "Internal libp2p network id relevant when running nodes in same process",
+        .node_key = "The node key in the genesis config for this lean node",
         .metrics_port = "Port to use for publishing metrics",
         .metrics_enable = "Enable metrics endpoint",
         .network_dir = "Directory to store network related information, e.g., peer ids, keys, etc.",
@@ -364,7 +368,8 @@ pub fn main() !void {
             var zeam_logger_config = utils_lib.getLoggerConfig(console_log_level, utils_lib.FileBehaviourParams{ .fileActiveLevel = log_file_active_level, .filePath = log_filepath, .fileName = log_filename });
 
             var start_options: node.NodeOptions = .{
-                .node_id = leancmd.node_id,
+                .network_id = leancmd.network_id,
+                .node_key = leancmd.node_key,
                 .metrics_enable = leancmd.metrics_enable,
                 .metrics_port = leancmd.metrics_port,
                 .bootnodes = undefined,
