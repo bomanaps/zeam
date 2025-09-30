@@ -29,6 +29,7 @@ const prefix = "zeam_";
 pub const NodeOptions = struct {
     network_id: u32,
     node_key: []const u8,
+    node_key_index: usize,
     bootnodes: []const []const u8,
     validator_indices: []usize,
     genesis_spec: types.GenesisSpec,
@@ -180,7 +181,7 @@ pub const Node = struct {
         self.logger.info("════════════════════════════════════════════════════════", .{});
         self.logger.info("  🚀 Zeam Lean Node Started Successfully!", .{});
         self.logger.info("════════════════════════════════════════════════════════", .{});
-        self.logger.info("  Node ID: {d}", .{self.options.node_id});
+        self.logger.info("  Node ID: {d}", .{self.options.node_key_index});
         self.logger.info("  Listening on QUIC port: {?d}", .{quic_port});
         self.logger.info("  ENR: {s}", .{encoded_txt});
         self.logger.info("────────────────────────────────────────────────────────", .{});
@@ -206,7 +207,7 @@ pub const Node = struct {
         defer connect_peer_list.deinit(self.allocator);
 
         for (self.options.bootnodes, 0..) |n, i| {
-            if (i != self_node_index) {
+            if (i != self.options.node_key_index) {
                 var n_enr: ENR = undefined;
                 try ENR.decodeTxtInto(&n_enr, n);
                 var peer_multiaddr_list = try n_enr.multiaddrP2PQUIC(self.allocator);

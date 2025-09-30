@@ -370,6 +370,7 @@ pub fn main() !void {
             var start_options: node.NodeOptions = .{
                 .network_id = leancmd.network_id,
                 .node_key = leancmd.node_key,
+                .node_key_index = undefined,
                 .metrics_enable = leancmd.metrics_enable,
                 .metrics_port = leancmd.metrics_port,
                 .bootnodes = undefined,
