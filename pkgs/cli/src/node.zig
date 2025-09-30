@@ -351,7 +351,7 @@ fn validatorIndicesFromYAML(allocator: std.mem.Allocator, node_key: []const u8, 
 fn nodeKeyIndexFromYaml(node_key: []const u8, validator_config: Yaml) !usize {
     var index: usize = 0;
     for (validator_config.docs.items[0].map.get("validators").?.list) |entry| {
-        if (std.mem.eql(u8, entry.get("name").?, node_key)) {
+        if (std.mem.eql(u8, entry.map.get("name").?, node_key)) {
             return index;
         }
         index += 1;
