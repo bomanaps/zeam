@@ -18,4 +18,4 @@ validators:
       #verify /ip4/127.0.0.1/udp/9001/quic-v1/p2p/16Uiu2HAmPQhkD6Zg5Co2ee8ShshkiY4tDePKFARPpCS2oKSLj1E1
       ip: "127.0.0.1"
       quic: 9001
-    count: 2
+    count: 1
