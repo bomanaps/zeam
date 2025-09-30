@@ -4,17 +4,17 @@ const node_lib = @import("@zeam/node");
 const BeamNode = node_lib.BeamNode;
 const Clock = node_lib.Clock;
 const utils_lib = @import("@zeam/utils");
-const node = @import("../node.zig");
-const Node = node.Node;
-const NodeOptions = node.NodeOptions;
-const NodeCommand = @import("../main.zig").NodeCommand;
+const cli = @import("@zeam/cli");
+const Node = cli.Node;
+const NodeOptions = cli.NodeOptions;
+const NodeCommand = cli.NodeCommand;
 const configs = @import("@zeam/configs");
 const networks = @import("@zeam/network");
 const enr_lib = @import("enr");
 const enr = enr_lib;
 const sft = @import("@zeam/state-transition");
 const api = @import("@zeam/api");
-const api_server = @import("../api_server.zig");
+const api_server = cli.api_server;
 const xev = @import("xev");
 const Multiaddr = @import("multiformats").multiaddr.Multiaddr;
 
@@ -224,8 +224,8 @@ fn runTwoNodesInProcessToFinalization(allocator: Allocator, config: TestConfig) 
     };
 
     // Load configurations from genesis files
-    try node.buildStartOptions(node0_allocator, node_cmd_0, &start_options_0);
-    try node.buildStartOptions(node1_allocator, node_cmd_1, &start_options_1);
+    try cli.buildStartOptions(node0_allocator, node_cmd_0, &start_options_0);
+    try cli.buildStartOptions(node1_allocator, node_cmd_1, &start_options_1);
 
     // Create real Node instances using the same initialization as CLI
     var node_0: Node = undefined;
