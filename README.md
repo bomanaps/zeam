@@ -84,6 +84,11 @@ at the root of the repository.
 > zig build -Doptimize=ReleaseFast install run -- prove
 ```
 
+#### Local Devnet
+
+To run a local devnet with multiple nodes for testing and development, see the [Local Devnet Setup Guide](./pkgs/cli/test/fixtures/README.md) which provides detailed instructions for running a 2-node setup with finalization.
+
+
 ### Reporting Issues
 
 Open an [issue or a bug](https://github.com/blockblaz/zeam/issues/new) or else talk to us via our [community telegram group](https://t.me/zeamETH).
