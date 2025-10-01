@@ -12,11 +12,12 @@ popupTerminal="gnome-terminal --disable-factory --"
 for item in "${spin_nodes[@]}"; do
   echo "spining $item..."
 
-  execCmd="../zig-out/bin/zeam node \
+  execCmd="$scriptDir/../zig-out/bin/zeam node \
   --custom_genesis $configDir \
   --network_dir $configDir/$item \
   --data_dir $dataDir/$item \
-  --node_key $item"
+  --node_key $item \
+  --validator_config $validatorConfig"
 
   if [ ! -n "$inTerminal" ]
   then

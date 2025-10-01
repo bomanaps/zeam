@@ -26,6 +26,11 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
+    --validatorConfig)
+      validatorConfig="$2"
+      shift # past argument
+      shift # past value
+      ;;
     --freshStart)
       freshStart=true
       shift # past argument
@@ -50,7 +55,15 @@ then
   echo "no node specified, exiting..."
   exit
 fi;
-#ideally read config and figure out all nodes in the array
+
+if [ ! -n "$validatorConfig" ]
+then
+  echo "no external validator config provided, assuming genesis bootnode"
+  validatorConfig="genesis_bootnode"
+fi;
+
+# ideally read config from validatorConfig and figure out all nodes in the array
+# if validatorConfig is genesis bootnode then we read the genesis/validator_config.yaml for this
 nodes=("zeam_0" "zeam_1")
 spin_nodes=()
 
