@@ -84,10 +84,11 @@ at the root of the repository.
 > zig build -Doptimize=ReleaseFast install run -- prove
 ```
 
-#### Local Devnet
+#### Local Lean Devnet
 
 To run a local devnet with multiple nodes for testing and development, see the [Local Devnet Setup Guide](./pkgs/cli/test/fixtures/README.md) which provides detailed instructions for running a 2-node setup with finalization.
 
+or use the handy [lean-quickstart](./lean-quickstart/README.md) tool to spin up two nodes for local interop.
 
 ### Reporting Issues
 
