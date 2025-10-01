@@ -129,7 +129,7 @@ Open a new terminal window and run:
   --node_key "zeam_0" \
   --network_dir ./data/test_node0 \
   --override_genesis_time $GENESIS_TIME \
-  --db_path ./data/test_node0
+  --data_dir ./data/test_node0
 ```
 
 Replace `$GENESIS_TIME` with the actual timestamp from Step 0.
@@ -144,7 +144,7 @@ Open another terminal window and run:
   --node_key "zeam_1" \
   --network_dir ./data/test_node1 \
   --override_genesis_time $GENESIS_TIME \
-  --db_path ./data/test_node1
+  --data_dir ./data/test_node1
 ```
 
 Use the **SAME** `$GENESIS_TIME` value from Step 0.
@@ -246,12 +246,12 @@ For quick reference, here are the commands assuming `GENESIS_TIME=1759210782`:
 
 **Terminal 1 (zeam_0):**
 ```bash
-./zig-out/bin/zeam node --custom_genesis ./genesis --node_key "zeam_0" --network_dir ./data/test_node0 --override_genesis_time 1759210782 --db_path ./data/test_node0
+./zig-out/bin/zeam node --custom_genesis ./genesis --node_key "zeam_0" --network_dir ./data/test_node0 --override_genesis_time 1759210782 --data_dir ./data/test_node0
 ```
 
 **Terminal 2 (zeam_1):**
 ```bash
-./zig-out/bin/zeam node --custom_genesis ./genesis --node_key "zeam_1" --network_dir ./data/test_node1 --override_genesis_time 1759210782 --db_path ./data/test_node1
+./zig-out/bin/zeam node --custom_genesis ./genesis --node_key "zeam_1" --network_dir ./data/test_node1 --override_genesis_time 1759210782 --data_dir ./data/test_node1
 ```
 
 Replace `1759210782` with your actual `GENESIS_TIME` from `date +%s`.

@@ -44,7 +44,7 @@ pub const NodeCommand = struct {
     metrics_port: u16 = constants.DEFAULT_METRICS_PORT,
     override_genesis_time: ?u64,
     network_dir: []const u8 = "./network",
-    db_path: []const u8 = constants.DEFAULT_DB_PATH,
+    data_dir: []const u8 = constants.DEFAULT_DATA_DIR,
 
     pub const __shorts__ = .{
         .help = .h,
@@ -58,7 +58,7 @@ pub const NodeCommand = struct {
         .metrics_enable = "Enable metrics endpoint",
         .network_dir = "Directory to store network related information, e.g., peer ids, keys, etc.",
         .override_genesis_time = "Override genesis time in the config.yaml",
-        .db_path = "Path to the database directory",
+        .data_dir = "Path to the data directory",
         .help = "Show help information for the node command",
     };
 };
@@ -84,7 +84,7 @@ const ZeamArgs = struct {
             help: bool = false,
             mockNetwork: bool = false,
             metricsPort: u16 = constants.DEFAULT_METRICS_PORT,
-            db_path: []const u8 = constants.DEFAULT_DB_PATH,
+            data_dir: []const u8 = constants.DEFAULT_DATA_DIR,
         },
         prove: struct {
             dist_dir: []const u8 = "zig-out/bin",
@@ -318,14 +318,14 @@ pub fn main() !void {
             var validator_ids_1 = [_]usize{1};
             var validator_ids_2 = [_]usize{2};
 
-            const db_path_1 = try std.fmt.allocPrint(allocator, "{s}/node1", .{beamcmd.db_path});
-            defer allocator.free(db_path_1);
-            const db_path_2 = try std.fmt.allocPrint(allocator, "{s}/node2", .{beamcmd.db_path});
-            defer allocator.free(db_path_2);
+            const data_dir_1 = try std.fmt.allocPrint(allocator, "{s}/node1", .{beamcmd.data_dir});
+            defer allocator.free(data_dir_1);
+            const data_dir_2 = try std.fmt.allocPrint(allocator, "{s}/node2", .{beamcmd.data_dir});
+            defer allocator.free(data_dir_2);
 
-            var db_1 = try database.Db.open(allocator, logger1_config.logger(.database), db_path_1);
+            var db_1 = try database.Db.open(allocator, logger1_config.logger(.database), data_dir_1);
             defer db_1.deinit();
-            var db_2 = try database.Db.open(allocator, logger2_config.logger(.database), db_path_2);
+            var db_2 = try database.Db.open(allocator, logger2_config.logger(.database), data_dir_2);
             defer db_2.deinit();
 
             var beam_node_1 = try BeamNode.init(allocator, .{
@@ -378,7 +378,7 @@ pub fn main() !void {
                 .validator_indices = undefined,
                 .local_priv_key = undefined,
                 .logger_config = &zeam_logger_config,
-                .database_path = leancmd.db_path,
+                .database_path = leancmd.data_dir,
             };
 
             defer start_options.deinit(allocator);
