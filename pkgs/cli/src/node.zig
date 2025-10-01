@@ -26,6 +26,29 @@ const database = @import("@zeam/database");
 
 const prefix = "zeam_";
 
+// Structure to hold parsed ENR fields from validator-config.yaml
+const EnrFields = struct {
+    ip: ?[]const u8 = null,
+    ip6: ?[]const u8 = null,
+    tcp: ?u16 = null,
+    udp: ?u16 = null,
+    quic: ?u16 = null,
+    seq: ?u64 = null,
+    // Allow for custom fields
+    custom_fields: std.StringHashMap([]const u8),
+
+    pub fn deinit(self: *EnrFields, allocator: std.mem.Allocator) void {
+        if (self.ip) |ip_str| allocator.free(ip_str);
+        if (self.ip6) |ip6_str| allocator.free(ip6_str);
+        var iterator = self.custom_fields.iterator();
+        while (iterator.next()) |entry| {
+            allocator.free(entry.key_ptr.*);
+            allocator.free(entry.value_ptr.*);
+        }
+        self.custom_fields.deinit();
+    }
+};
+
 pub const NodeOptions = struct {
     network_id: u32,
     node_key: []const u8,
@@ -198,8 +221,22 @@ pub const Node = struct {
         if (std.mem.eql(u8, self.options.validator_config, "genesis_bootnode")) {
             try ENR.decodeTxtInto(&self.enr, self.options.bootnodes[self.options.node_key_index]);
         } else {
-            // parse from validator_config and not from nodes.yaml
-            return error.NotImplemented;
+            // Parse validator config to get ENR fields
+            const validator_config_filepath = try std.mem.concat(self.allocator, u8, &[_][]const u8{
+                self.options.validator_config,
+                "/validator-config.yaml",
+            });
+            defer self.allocator.free(validator_config_filepath);
+
+            var parsed_validator_config = try utils_lib.loadFromYAMLFile(self.allocator, validator_config_filepath);
+            defer parsed_validator_config.deinit(self.allocator);
+
+            // Get ENR fields from validator config
+            var enr_fields = try getEnrFieldsFromValidatorConfig(self.allocator, self.options.node_key, parsed_validator_config);
+            defer enr_fields.deinit(self.allocator);
+
+            // Construct ENR from fields and private key
+            self.enr = try constructENRFromFields(self.allocator, self.options.local_priv_key, enr_fields);
         }
 
         // Overriding the IP to 0.0.0.0 to listen on all interfaces
@@ -397,6 +434,213 @@ fn getPrivateKeyFromValidatorConfig(allocator: std.mem.Allocator, node_key: []co
     return error.InvalidNodeKey;
 }
 
+fn getEnrFieldsFromValidatorConfig(allocator: std.mem.Allocator, node_key: []const u8, validator_config: Yaml) !EnrFields {
+    for (validator_config.docs.items[0].map.get("validators").?.list) |entry| {
+        const name_value = entry.map.get("name").?;
+        if (name_value == .string and std.mem.eql(u8, name_value.string, node_key)) {
+            const enr_fields_value = entry.map.get("enrFields");
+            if (enr_fields_value == null) {
+                return error.MissingEnrFields;
+            }
+
+            var enr_fields = EnrFields{
+                .custom_fields = std.StringHashMap([]const u8).init(allocator),
+            };
+            errdefer enr_fields.deinit(allocator);
+
+            const fields_map = enr_fields_value.?.map;
+
+            // Parse known fields
+            if (fields_map.get("ip")) |ip_value| {
+                if (ip_value == .string) {
+                    enr_fields.ip = try allocator.dupe(u8, ip_value.string);
+                }
+            }
+
+            if (fields_map.get("ip6")) |ip6_value| {
+                if (ip6_value == .string) {
+                    enr_fields.ip6 = try allocator.dupe(u8, ip6_value.string);
+                }
+            }
+
+            if (fields_map.get("tcp")) |tcp_value| {
+                if (tcp_value == .int) {
+                    enr_fields.tcp = @intCast(tcp_value.int);
+                }
+            }
+
+            if (fields_map.get("udp")) |udp_value| {
+                if (udp_value == .int) {
+                    enr_fields.udp = @intCast(udp_value.int);
+                }
+            }
+
+            if (fields_map.get("quic")) |quic_value| {
+                if (quic_value == .int) {
+                    enr_fields.quic = @intCast(quic_value.int);
+                }
+            }
+
+            if (fields_map.get("seq")) |seq_value| {
+                if (seq_value == .int) {
+                    enr_fields.seq = @intCast(seq_value.int);
+                }
+            }
+
+            // Parse custom fields
+            var iterator = fields_map.iterator();
+            while (iterator.next()) |kv| {
+                const key = kv.key_ptr.*;
+                const value = kv.value_ptr.*;
+
+                // Skip known fields
+                if (std.mem.eql(u8, key, "ip") or
+                    std.mem.eql(u8, key, "ip6") or
+                    std.mem.eql(u8, key, "tcp") or
+                    std.mem.eql(u8, key, "udp") or
+                    std.mem.eql(u8, key, "quic") or
+                    std.mem.eql(u8, key, "seq"))
+                {
+                    continue;
+                }
+
+                // Handle custom field based on type
+                if (value == .string) {
+                    const key_copy = try allocator.dupe(u8, key);
+                    const value_copy = try allocator.dupe(u8, value.string);
+                    try enr_fields.custom_fields.put(key_copy, value_copy);
+                } else if (value == .int) {
+                    // Convert integer to string for custom fields with proper padding
+                    const value_str = try std.fmt.allocPrint(allocator, "0x{x:0>8}", .{@as(u32, @intCast(value.int))});
+                    const key_copy = try allocator.dupe(u8, key);
+                    try enr_fields.custom_fields.put(key_copy, value_str);
+                }
+            }
+
+            return enr_fields;
+        }
+    }
+    return error.InvalidNodeKey;
+}
+
+fn constructENRFromFields(allocator: std.mem.Allocator, private_key: []const u8, enr_fields: EnrFields) !ENR {
+    // Clean up private key (remove 0x prefix if present)
+    const secret_key_str = if (std.mem.startsWith(u8, private_key, "0x"))
+        private_key[2..]
+    else
+        private_key;
+
+    if (secret_key_str.len != 64) {
+        return error.InvalidSecretKeyLength;
+    }
+
+    // Create SignableENR from private key
+    var signable_enr = enr_lib.SignableENR.fromSecretKeyString(secret_key_str) catch {
+        return error.ENRCreationFailed;
+    };
+
+    // Set IP address (IPv4)
+    if (enr_fields.ip) |ip_str| {
+        const ip_addr = std.net.Ip4Address.parse(ip_str, 0) catch {
+            return error.InvalidIPAddress;
+        };
+        const ip_addr_bytes = std.mem.asBytes(&ip_addr.sa.addr);
+        signable_enr.set("ip", ip_addr_bytes) catch {
+            return error.ENRSetIPFailed;
+        };
+    }
+
+    // Set IP address (IPv6)
+    if (enr_fields.ip6) |ip6_str| {
+        const ip6_addr = std.net.Ip6Address.parse(ip6_str, 0) catch {
+            return error.InvalidIP6Address;
+        };
+        const ip6_addr_bytes = std.mem.asBytes(&ip6_addr.sa.addr);
+        signable_enr.set("ip6", ip6_addr_bytes) catch {
+            return error.ENRSetIP6Failed;
+        };
+    }
+
+    // Set TCP port
+    if (enr_fields.tcp) |tcp_port| {
+        var tcp_bytes: [2]u8 = undefined;
+        std.mem.writeInt(u16, &tcp_bytes, tcp_port, .big);
+        signable_enr.set("tcp", &tcp_bytes) catch {
+            return error.ENRSetTCPFailed;
+        };
+    }
+
+    // Set UDP port
+    if (enr_fields.udp) |udp_port| {
+        var udp_bytes: [2]u8 = undefined;
+        std.mem.writeInt(u16, &udp_bytes, udp_port, .big);
+        signable_enr.set("udp", &udp_bytes) catch {
+            return error.ENRSetUDPFailed;
+        };
+    }
+
+    // Set QUIC port
+    if (enr_fields.quic) |quic_port| {
+        var quic_bytes: [2]u8 = undefined;
+        std.mem.writeInt(u16, &quic_bytes, quic_port, .big);
+        signable_enr.set("quic", &quic_bytes) catch {
+            return error.ENRSetQUICFailed;
+        };
+    }
+
+    // Set sequence number
+    if (enr_fields.seq) |seq_num| {
+        var seq_bytes: [8]u8 = undefined;
+        std.mem.writeInt(u64, &seq_bytes, seq_num, .big);
+        signable_enr.set("seq", &seq_bytes) catch {
+            return error.ENRSetSEQFailed;
+        };
+    }
+
+    // Set custom fields
+    var custom_iterator = enr_fields.custom_fields.iterator();
+    while (custom_iterator.next()) |kv| {
+        const key = kv.key_ptr.*;
+        const value = kv.value_ptr.*;
+
+        // Try to parse as hex if it starts with 0x
+        if (std.mem.startsWith(u8, value, "0x")) {
+            const hex_value = value[2..];
+            if (hex_value.len % 2 != 0) {
+                return error.InvalidHexValue;
+            }
+            const bytes = try allocator.alloc(u8, hex_value.len / 2);
+            defer allocator.free(bytes);
+
+            _ = std.fmt.hexToBytes(bytes, hex_value) catch {
+                return error.InvalidHexFormat;
+            };
+
+            signable_enr.set(key, bytes) catch {
+                return error.ENRSetCustomFieldFailed;
+            };
+        } else {
+            // Treat as string
+            signable_enr.set(key, value) catch {
+                return error.ENRSetCustomFieldFailed;
+            };
+        }
+    }
+
+    // Convert SignableENR to ENR
+    var buffer: [1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buffer);
+    const writer = fbs.writer();
+
+    try enr_lib.writeSignableENR(writer, &signable_enr);
+    const enr_text = fbs.getWritten();
+
+    var enr: ENR = undefined;
+    try ENR.decodeTxtInto(&enr, enr_text);
+
+    return enr;
+}
+
 test "config yaml parsing" {
     var config1 = try utils_lib.loadFromYAMLFile(std.testing.allocator, "pkgs/cli/test/fixtures/config.yaml");
     defer config1.deinit(std.testing.allocator);
@@ -424,4 +668,64 @@ test "config yaml parsing" {
     try std.testing.expectEqualStrings("enr:-IW4QA0pljjdLfxS_EyUxNAxJSoGCwmOVNJauYWsTiYHyWG5Bky-7yCEktSvu_w-PWUrmzbc8vYL_Mx5pgsAix2OfOMBgmlkgnY0gmlwhKwUAAGEcXVpY4IfkIlzZWNwMjU2azGhA6mw8mfwe-3TpjMMSk7GHe3cURhOn9-ufyAqy40wEyui", nodes[0]);
     try std.testing.expectEqualStrings("enr:-IW4QNx7F6OKXCmx9igmSwOAOdUEiQ9Et73HNygWV1BbuFgkXZLMslJVgpLYmKAzBF-AO0qJYq40TtqvtFkfeh2jzqYBgmlkgnY0gmlwhKwUAAKEcXVpY4IfkIlzZWNwMjU2azGhA2hqUIfSG58w4lGPMiPp9llh1pjFuoSRUuoHmwNdHELw", nodes[1]);
     try std.testing.expectEqualStrings("enr:-IW4QOh370UNQipE8qYlVRK3MpT7I0hcOmrTgLO9agIxuPS2B485Se8LTQZ4Rhgo6eUuEXgMAa66Wt7lRYNHQo9zk8QBgmlkgnY0gmlwhKwUAAOEcXVpY4IfkIlzZWNwMjU2azGhA7NTxgfOmGE2EQa4HhsXxFOeHdTLYIc2MEBczymm9IUN", nodes[2]);
+}
+
+test "ENR fields parsing from validator config" {
+    var validator_config = try utils_lib.loadFromYAMLFile(std.testing.allocator, "pkgs/cli/test/fixtures/validator-config.yaml");
+    defer validator_config.deinit(std.testing.allocator);
+
+    // Test parsing ENR fields for zeam_0
+    var enr_fields = try getEnrFieldsFromValidatorConfig(std.testing.allocator, "zeam_0", validator_config);
+    defer enr_fields.deinit(std.testing.allocator);
+
+    // Verify the parsed fields match expected values
+    try std.testing.expectEqualStrings("172.20.0.100", enr_fields.ip.?);
+    try std.testing.expectEqual(@as(u16, 9000), enr_fields.tcp.?);
+    try std.testing.expectEqual(@as(u16, 9001), enr_fields.quic.?);
+    try std.testing.expectEqual(@as(u64, 1), enr_fields.seq.?);
+
+    // Test parsing ENR fields for quadrivium_0
+    var enr_fields_1 = try getEnrFieldsFromValidatorConfig(std.testing.allocator, "quadrivium_0", validator_config);
+    defer enr_fields_1.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("2001:db8:85a3::8a2e:370:7334", enr_fields_1.ip6.?);
+    try std.testing.expectEqual(@as(u16, 30303), enr_fields_1.tcp.?);
+    try std.testing.expectEqual(@as(u16, 8080), enr_fields_1.quic.?);
+    try std.testing.expectEqual(@as(u64, 1), enr_fields_1.seq.?);
+
+    // Test custom field parsing
+    // Check if the custom field exists
+    const whatever_field = enr_fields.custom_fields.get("whatever");
+    if (whatever_field) |value| {
+        try std.testing.expectEqualStrings("0x01000000", value);
+    } else {
+        // If the field doesn't exist, that's also a test failure
+        try std.testing.expect(false);
+    }
+    // quadrivium_0 doesn't have custom fields, so just verify the custom_fields map is empty
+    try std.testing.expectEqual(@as(usize, 0), enr_fields_1.custom_fields.count());
+}
+
+test "ENR construction from fields" {
+    var validator_config = try utils_lib.loadFromYAMLFile(std.testing.allocator, "pkgs/cli/test/fixtures/validator-config.yaml");
+    defer validator_config.deinit(std.testing.allocator);
+
+    // Get ENR fields for zeam_0
+    var enr_fields = try getEnrFieldsFromValidatorConfig(std.testing.allocator, "zeam_0", validator_config);
+    defer enr_fields.deinit(std.testing.allocator);
+
+    // Get private key for zeam_0
+    const private_key = try getPrivateKeyFromValidatorConfig(std.testing.allocator, "zeam_0", validator_config);
+    defer std.testing.allocator.free(private_key);
+
+    // Construct ENR from fields
+    const constructed_enr = try constructENRFromFields(std.testing.allocator, private_key, enr_fields);
+
+    // Verify the ENR was constructed successfully
+    // We can't easily verify the exact ENR content without knowing the exact signature,
+    // but we can verify that specific fields are present in the constructed ENR
+    try std.testing.expect(constructed_enr.kvs.get("ip") != null);
+    try std.testing.expect(constructed_enr.kvs.get("quic") != null);
+    try std.testing.expect(constructed_enr.kvs.get("tcp") != null);
+    try std.testing.expect(constructed_enr.kvs.get("seq") != null);
 }
