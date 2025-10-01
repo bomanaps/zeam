@@ -28,7 +28,7 @@ pub const StateTransitionOpts = struct {
 // }
 
 // prepare the state to be the post-state of the slot
-fn process_slot(allocator: Allocator, state: *types.BeamState) !void {
+pub fn process_slot(allocator: Allocator, state: *types.BeamState) !void {
 
     // update state root in latest block header if its zero hash
     // i.e. just after processing the latest block of latest block header
@@ -42,7 +42,7 @@ fn process_slot(allocator: Allocator, state: *types.BeamState) !void {
 }
 
 // prepare the state to be pre state of the slot
-fn process_slots(allocator: Allocator, state: *types.BeamState, slot: types.Slot, logger: zeam_utils.ModuleLogger) !void {
+pub fn process_slots(allocator: Allocator, state: *types.BeamState, slot: types.Slot, logger: zeam_utils.ModuleLogger) !void {
     if (slot <= state.slot) {
         logger.err("Invalid block slot={d} >= pre-state slot={d}\n", .{ slot, state.slot });
         return StateTransitionError.InvalidPreState;

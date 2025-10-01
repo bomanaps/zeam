@@ -4,6 +4,8 @@ const configs = @import("@zeam/configs");
 const types = @import("@zeam/types");
 const ssz = @import("ssz");
 const params = @import("@zeam/params");
+const stf = @import("@zeam/state-transition");
+const zeam_utils = @import("@zeam/utils");
 
 fn sampleConfig() types.BeamStateConfig {
     return .{
@@ -479,4 +481,72 @@ test "test_generate_genesis" {
     try std.testing.expectEqual(@as(usize, 0), state.justified_slots.len());
     try std.testing.expectEqual(@as(usize, 0), state.justifications_roots.len());
     try std.testing.expectEqual(@as(usize, 0), state.justifications_validators.len());
+}
+test "test_process_slot" {
+    const allocator = std.testing.allocator;
+
+    // Create genesis state
+    var genesis_state = baseState(allocator);
+    defer genesis_state.deinit();
+
+    // At genesis, latest_block_header.state_root is zero.
+    const zero_hash = [_]u8{0} ** 32;
+    try std.testing.expect(std.mem.eql(u8, &genesis_state.latest_block_header.state_root, &zero_hash));
+
+    // Clone the state to preserve original for comparison (functional style simulation)
+    var state_after_slot = try types.sszClone(allocator, types.BeamState, genesis_state);
+    defer state_after_slot.deinit();
+
+    // Process one slot; this should backfill the header's state_root.
+    try stf.process_slot(allocator, &state_after_slot);
+
+    // The filled root must be the hash of the pre-slot state.
+    var expected_root: [32]u8 = undefined;
+    try ssz.hashTreeRoot(types.BeamState, genesis_state, &expected_root, allocator);
+    try std.testing.expect(std.mem.eql(u8, &state_after_slot.latest_block_header.state_root, &expected_root));
+
+    // Clone the state again for the second process_slot call
+    var state_after_second_slot = try types.sszClone(allocator, types.BeamState, state_after_slot);
+    defer state_after_second_slot.deinit();
+
+    // Re-processing the slot should be a no-op for the state_root.
+    try stf.process_slot(allocator, &state_after_second_slot);
+    try std.testing.expect(std.mem.eql(u8, &state_after_second_slot.latest_block_header.state_root, &expected_root));
+}
+
+test "test_process_slots" {
+    const allocator = std.testing.allocator;
+
+    // Create genesis state
+    var genesis_state = baseState(allocator);
+    defer genesis_state.deinit();
+
+    // Compute genesis state root for later comparison
+    var genesis_state_root: [32]u8 = undefined;
+    try ssz.hashTreeRoot(types.BeamState, genesis_state, &genesis_state_root, allocator);
+
+    // Clone state and advance to slot 5
+    var new_state = try types.sszClone(allocator, types.BeamState, genesis_state);
+    defer new_state.deinit();
+
+    // Create a test logger config
+    var logger_config = zeam_utils.getTestLoggerConfig();
+    const test_logger = logger_config.logger(null);
+
+    const target_slot: types.Slot = 5;
+    try stf.process_slots(allocator, &new_state, target_slot, test_logger);
+
+    // The state's slot should equal the target.
+    try std.testing.expectEqual(target_slot, new_state.slot);
+
+    // The header state_root should reflect the genesis state's root.
+    try std.testing.expect(std.mem.eql(u8, &new_state.latest_block_header.state_root, &genesis_state_root));
+
+    // Clone state again for testing backward slot movement
+    var state_for_backward_test = try types.sszClone(allocator, types.BeamState, new_state);
+    defer state_for_backward_test.deinit();
+
+    // Rewinding is invalid; expect an InvalidPreState error.
+    const result = stf.process_slots(allocator, &state_for_backward_test, 4, test_logger);
+    try std.testing.expectError(stf.StateTransitionError.InvalidPreState, result);
 }
