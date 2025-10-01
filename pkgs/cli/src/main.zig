@@ -40,6 +40,11 @@ pub const NodeCommand = struct {
     network_id: u32 = 0,
     // the node key in validators.yaml
     node_key: []const u8,
+    // 1. a special value of "genesis_bootnode" for validator config means its a genesis bootnode and so
+    //   the configuration is to be picked from genesis
+    // 2. otherwise validator_config is dir path to this nodes's validator_config.yaml and validatrs.yaml
+    //   and one must use all the nodes in genesis nodes.yaml as peers
+    validator_config: []const u8,
     metrics_enable: bool = false,
     metrics_port: u16 = constants.DEFAULT_METRICS_PORT,
     override_genesis_time: ?u64,
@@ -370,6 +375,7 @@ pub fn main() !void {
             var start_options: node.NodeOptions = .{
                 .network_id = leancmd.network_id,
                 .node_key = leancmd.node_key,
+                .validator_config = leancmd.validator_config,
                 .node_key_index = undefined,
                 .metrics_enable = leancmd.metrics_enable,
                 .metrics_port = leancmd.metrics_port,

@@ -30,6 +30,11 @@ pub const NodeOptions = struct {
     network_id: u32,
     node_key: []const u8,
     node_key_index: usize,
+    // 1. a special value of "genesis_bootnode" for validator config means its a genesis bootnode and so
+    //   the configuration is to be picked from genesis
+    // 2. otherwise validator_config is dir path to this nodes's validator_config.yaml and validatrs.yaml
+    //   and one must use all the nodes in genesis nodes.yaml as peers
+    validator_config: []const u8,
     bootnodes: []const []const u8,
     validator_indices: []usize,
     genesis_spec: types.GenesisSpec,
@@ -190,7 +195,12 @@ pub const Node = struct {
     }
 
     fn constructMultiaddrs(self: *Self) !struct { listen_addresses: []const Multiaddr, connect_peers: []const Multiaddr } {
-        try ENR.decodeTxtInto(&self.enr, self.options.bootnodes[self.options.node_key_index]);
+        if (std.mem.eql(u8, self.options.validator_config, "genesis_bootnode")) {
+            try ENR.decodeTxtInto(&self.enr, self.options.bootnodes[self.options.node_key_index]);
+        } else {
+            // parse from validator_config and not from nodes.yaml
+            return error.NotImplemented;
+        }
 
         // Overriding the IP to 0.0.0.0 to listen on all interfaces
         try self.enr.kvs.put("ip", "\x00\x00\x00\x00");
@@ -207,7 +217,8 @@ pub const Node = struct {
         defer connect_peer_list.deinit(self.allocator);
 
         for (self.options.bootnodes, 0..) |n, i| {
-            if (i != self.options.node_key_index) {
+            // don't exclude any entry from nodes.yaml if this is not a genesis bootnode
+            if (i != self.options.node_key_index or !std.mem.eql(u8, self.options.validator_config, "genesis_bootnode")) {
                 var n_enr: ENR = undefined;
                 try ENR.decodeTxtInto(&n_enr, n);
                 var peer_multiaddr_list = try n_enr.multiaddrP2PQUIC(self.allocator);
@@ -240,9 +251,23 @@ pub fn buildStartOptions(allocator: std.mem.Allocator, node_cmd: NodeCommand, op
     defer allocator.free(config_filepath);
     const bootnodes_filepath = try std.mem.concat(allocator, u8, &[_][]const u8{ node_cmd.custom_genesis, "/nodes.yaml" });
     defer allocator.free(bootnodes_filepath);
-    const validators_filepath = try std.mem.concat(allocator, u8, &[_][]const u8{ node_cmd.custom_genesis, "/validators.yaml" });
+    const validators_filepath = try std.mem.concat(allocator, u8, &[_][]const u8{
+        if (std.mem.eql(u8, node_cmd.validator_config, "genesis_bootnode"))
+            //
+            node_cmd.custom_genesis
+        else
+            node_cmd.validator_config,
+        "/validators.yaml",
+    });
     defer allocator.free(validators_filepath);
-    const validator_config_filepath = try std.mem.concat(allocator, u8, &[_][]const u8{ node_cmd.custom_genesis, "/validator-config.yaml" });
+    const validator_config_filepath = try std.mem.concat(allocator, u8, &[_][]const u8{
+        if (std.mem.eql(u8, node_cmd.validator_config, "genesis_bootnode"))
+            //
+            node_cmd.custom_genesis
+        else
+            node_cmd.validator_config,
+        "/validator-config.yaml",
+    });
     defer allocator.free(validator_config_filepath);
     // TODO: support genesis file loading when ssz library supports it
     // const genesis_filepath = try std.mem.concat(allocator, &[_][]const u8{custom_genesis, "/genesis.ssz"});
