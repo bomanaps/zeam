@@ -27,29 +27,12 @@ pub const StateTransitionOpts = struct {
 
 // prepare the state to be the post-state of the slot
 pub fn process_slot(allocator: Allocator, state: *types.BeamState) !void {
-
-    // update state root in latest block header if its zero hash
-    // i.e. just after processing the latest block of latest block header
-    // this completes latest block header for parentRoot checks of new block
-
-    if (std.mem.eql(u8, &state.latest_block_header.state_root, &utils.ZERO_HASH)) {
-        var prev_state_root: [32]u8 = undefined;
-        try ssz.hashTreeRoot(types.BeamState, state.*, &prev_state_root, allocator);
-        state.latest_block_header.state_root = prev_state_root;
-    }
+    return state.process_slot(allocator);
 }
 
 // prepare the state to be pre state of the slot
 pub fn process_slots(allocator: Allocator, state: *types.BeamState, slot: types.Slot, logger: zeam_utils.ModuleLogger) !void {
-    if (slot <= state.slot) {
-        logger.err("Invalid block slot={d} >= pre-state slot={d}\n", .{ slot, state.slot });
-        return StateTransitionError.InvalidPreState;
-    }
-
-    while (state.slot < slot) {
-        try process_slot(allocator, state);
-        state.slot += 1;
-    }
+    return state.process_slots(allocator, slot, logger);
 }
 
 pub fn is_justifiable_slot(finalized: types.Slot, candidate: types.Slot) !bool {
