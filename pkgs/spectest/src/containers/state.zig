@@ -4,7 +4,6 @@ const configs = @import("@zeam/configs");
 const types = @import("@zeam/types");
 const ssz = @import("ssz");
 const params = @import("@zeam/params");
-const stf = @import("@zeam/state-transition");
 const zeam_utils = @import("@zeam/utils");
 
 fn sampleConfig() types.BeamStateConfig {
@@ -498,7 +497,7 @@ test "test_process_slot" {
     defer state_after_slot.deinit();
 
     // Process one slot; this should backfill the header's state_root.
-    try stf.process_slot(allocator, &state_after_slot);
+    try state_after_slot.process_slot(allocator);
 
     // The filled root must be the hash of the pre-slot state.
     var expected_root: [32]u8 = undefined;
@@ -510,7 +509,7 @@ test "test_process_slot" {
     defer state_after_second_slot.deinit();
 
     // Re-processing the slot should be a no-op for the state_root.
-    try stf.process_slot(allocator, &state_after_second_slot);
+    try state_after_second_slot.process_slot(allocator);
     try std.testing.expect(std.mem.eql(u8, &state_after_second_slot.latest_block_header.state_root, &expected_root));
 }
 
@@ -534,7 +533,7 @@ test "test_process_slots" {
     const test_logger = logger_config.logger(null);
 
     const target_slot: types.Slot = 5;
-    try stf.process_slots(allocator, &new_state, target_slot, test_logger);
+    try new_state.process_slots(allocator, target_slot, test_logger);
 
     // The state's slot should equal the target.
     try std.testing.expectEqual(target_slot, new_state.slot);
@@ -547,6 +546,6 @@ test "test_process_slots" {
     defer state_for_backward_test.deinit();
 
     // Rewinding is invalid; expect an InvalidPreState error.
-    const result = stf.process_slots(allocator, &state_for_backward_test, 4, test_logger);
-    try std.testing.expectError(stf.StateTransitionError.InvalidPreState, result);
+    const result = state_for_backward_test.process_slots(allocator, 4, test_logger);
+    try std.testing.expectError(error.InvalidPreState, result);
 }
