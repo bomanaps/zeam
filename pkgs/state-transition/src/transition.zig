@@ -27,6 +27,16 @@ pub const StateTransitionOpts = struct {
 //     return;
 // }
 
+// prepare the state to be the post-state of the slot
+pub fn process_slot(allocator: Allocator, state: *types.BeamState) !void {
+    return state.process_slot(allocator);
+}
+
+// prepare the state to be pre state of the slot
+pub fn process_slots(allocator: Allocator, state: *types.BeamState, slot: types.Slot, logger: zeam_utils.ModuleLogger) !void {
+    return state.process_slots(allocator, slot, logger);
+}
+
 pub fn is_justifiable_slot(finalized: types.Slot, candidate: types.Slot) !bool {
     if (candidate < finalized) {
         return StateTransitionError.InvalidJustifiableSlot;
