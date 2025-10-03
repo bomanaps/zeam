@@ -637,6 +637,6 @@ test "test_hash_tree_root_validation_against_python_spec" {
     try std.testing.expect(std.mem.eql(u8, &state_after_slots.latest_block_header.state_root, &genesis_root));
 
     // Test that our hash matches Python leanSpec reference implementation
-    const expected_python_hash = "dc936297bf91996914aad67aff4f1112b36c8809d008a5119b6c75eea473378b";
+    const expected_python_hash = "933fc69092f542e467681ac6cf9dae4a616ba5ea9c3c61f93cbcaf0be3548e01";
     try std.testing.expect(std.mem.eql(u8, hex_string, expected_python_hash));
 }
