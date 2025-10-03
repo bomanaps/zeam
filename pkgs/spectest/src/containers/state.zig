@@ -636,9 +636,7 @@ test "test_hash_tree_root_validation_against_python_spec" {
     // The state root in the header should still match the original genesis root
     try std.testing.expect(std.mem.eql(u8, &state_after_slots.latest_block_header.state_root, &genesis_root));
 
-    // Print the computed hash for manual verification against Python spec
-    std.debug.print("Genesis state hash tree root: {s}\n", .{hex_string});
-    std.debug.print("Python leanSpec hash tree root: dc936297bf91996914aad67aff4f1112b36c8809d008a5119b6c75eea473378b\n", .{});
-    std.debug.print("⚠️  Hash mismatch indicates empty collections merkleization issue in our SSZ library\n", .{});
-    std.debug.print("TODO: Fix empty List/Bitlist handling to match leanSpec reference implementation\n", .{});
+    // Test that our hash matches Python leanSpec reference implementation
+    const expected_python_hash = "dc936297bf91996914aad67aff4f1112b36c8809d008a5119b6c75eea473378b";
+    try std.testing.expect(std.mem.eql(u8, hex_string, expected_python_hash));
 }
