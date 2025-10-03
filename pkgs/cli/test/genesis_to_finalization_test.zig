@@ -180,7 +180,7 @@ fn spawnZeamNodeProcess(
         "node",
         "--custom_genesis",
         config.test_dir,
-        "--node_key",
+        "--node-id",
         node_key,
         "--validator_config",
         "genesis_bootnode",
@@ -189,9 +189,9 @@ fn spawnZeamNodeProcess(
         "--metrics_enable",
         "--metrics_port",
         metrics_port_str,
-        "--network_dir",
+        "--network-dir",
         network_dir,
-        "--data_dir",
+        "--data-dir",
         db_path,
     };
 
