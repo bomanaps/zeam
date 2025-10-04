@@ -383,20 +383,19 @@ pub fn main() !void {
                 .network_id = leancmd.network_id,
                 .node_key = leancmd.@"node-id",
                 .validator_config = leancmd.validator_config,
-                .node_key_index = 0,
+                .node_key_index = undefined,
                 .metrics_enable = leancmd.metrics_enable,
                 .metrics_port = leancmd.metrics_port,
-                .bootnodes = &[_][]const u8{},
-                .genesis_spec = .{ .genesis_time = 0, .num_validators = 0 },
-                .validator_indices = &[_]usize{},
-                .local_priv_key = "",
+                .bootnodes = undefined,
+                .genesis_spec = undefined,
+                .validator_indices = undefined,
+                .local_priv_key = undefined,
                 .logger_config = &zeam_logger_config,
                 .database_path = leancmd.@"data-dir",
             };
 
-            defer start_options.deinit(allocator);
-
             try node.buildStartOptions(allocator, leancmd, &start_options);
+            defer start_options.deinit(allocator);
 
             var lean_node: node.Node = undefined;
             try lean_node.init(allocator, &start_options);
