@@ -28,6 +28,9 @@ fn getTimestamp() i128 {
 }
 
 // Global metrics instance
+// Note: Metrics are initialized as no-op by default. When init() is not called,
+// or when called on ZKVM targets, all metric operations are no-ops automatically.
+// This design eliminates the need for conditional checks in metric recording functions.
 var metrics = metrics_lib.initializeNoop(Metrics);
 var g_initialized: bool = false;
 
@@ -126,8 +129,8 @@ pub const event_broadcaster = @import("./event_broadcaster.zig");
 
 /// Sets the lean head slot metric.
 /// This should be called whenever the fork choice head is updated.
+/// Note: Automatically no-op if metrics are not initialized or running on ZKVM.
 pub fn setLeanHeadSlot(slot: u64) void {
-    if (!g_initialized or isZKVM()) return;
     metrics.lean_head_slot.set(slot);
 }
 
