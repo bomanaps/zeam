@@ -78,7 +78,11 @@ pub const BeamChain = struct {
         connected_peers: *const std.StringHashMap(PeerInfo),
     ) !Self {
         const logger_config = opts.logger_config;
-        const fork_choice = try fcFactory.ForkChoice.init(allocator, opts.config, opts.anchorState.*, logger_config.logger(.forkchoice));
+        const fork_choice = try fcFactory.ForkChoice.init(allocator, .{
+            .config = opts.config,
+            .anchorState = opts.anchorState,
+            .logger = logger_config.logger(.forkchoice),
+        });
 
         var states = std.AutoHashMap(types.Root, *types.BeamState).init(allocator);
         const cloned_anchor_state = try allocator.create(types.BeamState);
