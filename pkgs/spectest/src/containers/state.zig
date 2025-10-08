@@ -516,7 +516,8 @@ test "test_process_slot" {
     try std.testing.expect(std.mem.eql(u8, &genesis_state.latest_block_header.state_root, &zero_hash));
 
     // Clone the state to preserve original for comparison (functional style simulation)
-    var state_after_slot = try types.sszClone(allocator, types.BeamState, genesis_state);
+    var state_after_slot: types.BeamState = undefined;
+    try types.sszClone(allocator, types.BeamState, genesis_state, &state_after_slot);
     defer state_after_slot.deinit();
 
     // Process one slot; this should backfill the header's state_root.
@@ -536,7 +537,8 @@ test "test_process_slot" {
     try std.testing.expect(!std.mem.eql(u8, hex_string, "0000000000000000000000000000000000000000000000000000000000000000"));
 
     // Clone the state again for the second process_slot call
-    var state_after_second_slot = try types.sszClone(allocator, types.BeamState, state_after_slot);
+    var state_after_second_slot: types.BeamState = undefined;
+    try types.sszClone(allocator, types.BeamState, state_after_slot, &state_after_second_slot);
     defer state_after_second_slot.deinit();
 
     // Re-processing the slot should be a no-op for the state_root.
@@ -556,7 +558,8 @@ test "test_process_slots" {
     try ssz.hashTreeRoot(types.BeamState, genesis_state, &genesis_state_root, allocator);
 
     // Clone state and advance to slot 5
-    var new_state = try types.sszClone(allocator, types.BeamState, genesis_state);
+    var new_state: types.BeamState = undefined;
+    try types.sszClone(allocator, types.BeamState, genesis_state, &new_state);
     defer new_state.deinit();
 
     // Create a test logger config
@@ -581,7 +584,8 @@ test "test_process_slots" {
     try std.testing.expect(!std.mem.eql(u8, hex_string, "0000000000000000000000000000000000000000000000000000000000000000"));
 
     // Clone state again for testing backward slot movement
-    var state_for_backward_test = try types.sszClone(allocator, types.BeamState, new_state);
+    var state_for_backward_test: types.BeamState = undefined;
+    try types.sszClone(allocator, types.BeamState, new_state, &state_for_backward_test);
     defer state_for_backward_test.deinit();
 
     // Rewinding is invalid; expect an InvalidPreState error.
@@ -615,7 +619,8 @@ test "test_hash_tree_root_validation_against_python_spec" {
     try std.testing.expect(std.mem.eql(u8, &genesis_root, &genesis_root2));
 
     // Test 2: Validate process_slot hash tree root consistency
-    var state_after_slot = try types.sszClone(allocator, types.BeamState, genesis_state);
+    var state_after_slot: types.BeamState = undefined;
+    try types.sszClone(allocator, types.BeamState, genesis_state, &state_after_slot);
     defer state_after_slot.deinit();
 
     try state_after_slot.process_slot(allocator);
@@ -624,7 +629,8 @@ test "test_hash_tree_root_validation_against_python_spec" {
     try std.testing.expect(std.mem.eql(u8, &state_after_slot.latest_block_header.state_root, &genesis_root));
 
     // Test 3: Validate process_slots hash tree root consistency
-    var state_after_slots = try types.sszClone(allocator, types.BeamState, genesis_state);
+    var state_after_slots: types.BeamState = undefined;
+    try types.sszClone(allocator, types.BeamState, genesis_state, &state_after_slots);
     defer state_after_slots.deinit();
 
     // Set logger for process_slots
