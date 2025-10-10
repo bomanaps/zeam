@@ -36,7 +36,7 @@ const mini_3sf = @import("./mini_3sf.zig");
 pub const Checkpoint = mini_3sf.Checkpoint;
 pub const Status = mini_3sf.Status;
 
-const utils = @import("./utils.zig");
+pub const utils = @import("./utils.zig");
 pub const jsonToString = utils.jsonToString;
 pub const Bytes32 = utils.Bytes32;
 pub const Slot = utils.Slot;
