@@ -535,6 +535,9 @@ pub const ForkChoice = struct {
     }
 
     pub fn onAttestation(self: *Self, signed_vote: types.SignedVote, is_from_block: bool) !void {
+        // Validate attestation structure and constraints before processing
+        try self.validateAttestation(signed_vote);
+
         // vote has to be of an ancestor of the current slot
         const validator_id = signed_vote.validator_id;
         const vote = signed_vote.message;
