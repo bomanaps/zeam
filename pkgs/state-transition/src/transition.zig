@@ -116,9 +116,178 @@ fn process_execution_payload_header(state: *types.BeamState, block: types.BeamBl
     }
 }
 
+/// Helper function to check if a slot is justifiable after finalization
+/// Exported for use by other modules (forkchoice, validator, etc.)
+pub fn is_justifiable_slot(finalized: types.Slot, candidate: types.Slot) !bool {
+    if (candidate < finalized) {
+        return StateTransitionError.InvalidJustifiableSlot;
+    }
+
+    const delta: f32 = @floatFromInt(candidate - finalized);
+    if (delta <= 5) {
+        return true;
+    }
+    const delta_x2: f32 = @mod(std.math.pow(f32, delta, 0.5), 1);
+    if (delta_x2 == 0) {
+        return true;
+    }
+    const delta_x2_x: f32 = @mod(std.math.pow(f32, delta + 0.25, 0.5), 1);
+    if (delta_x2_x == 0.5) {
+        return true;
+    }
+
+    return false;
+}
+
+/// Process attestations and update justification/finalization state
+/// Implements attestation validation as per the leanSpec
+fn process_attestations(allocator: Allocator, state: *types.BeamState, attestations: types.SignedVotes, logger: zeam_utils.ModuleLogger) !void {
+    logger.debug("process attestations slot={d} \n prestate:historical hashes={d} justified slots ={d} votes={d}, ", .{ state.slot, state.historical_block_hashes.len(), state.justified_slots.len(), attestations.constSlice().len });
+    const justified_str = try state.latest_justified.toJsonString(allocator);
+    defer allocator.free(justified_str);
+    const finalized_str = try state.latest_finalized.toJsonString(allocator);
+    defer allocator.free(finalized_str);
+
+    logger.debug("prestate justified={s} finalized={s}", .{ justified_str, finalized_str });
+
+    // Get current justifications from state
+    var justifications: std.AutoHashMapUnmanaged(types.Root, []u8) = .empty;
+    defer {
+        var iterator = justifications.iterator();
+        while (iterator.next()) |entry| {
+            allocator.free(entry.value_ptr.*);
+        }
+    }
+    errdefer justifications.deinit(allocator);
+    try state.getJustification(allocator, &justifications);
+
+    const num_validators: usize = @intCast(state.config.num_validators);
+
+    // Process each attestation
+    for (attestations.constSlice()) |signed_vote| {
+        const validator_id: usize = @intCast(signed_vote.validator_id);
+        const vote = signed_vote.message;
+
+        // Validate vote structure
+        const source_slot: usize = @intCast(vote.source.slot);
+        const target_slot: usize = @intCast(vote.target.slot);
+        const vote_str = try vote.toJsonString(allocator);
+        defer allocator.free(vote_str);
+
+        logger.debug("processing vote={s} validator_id={d}\n....\n", .{ vote_str, validator_id });
+
+        // Check slot indices are within bounds
+        if (source_slot >= state.justified_slots.len()) {
+            return StateTransitionError.InvalidSlotIndex;
+        }
+        if (target_slot >= state.justified_slots.len()) {
+            return StateTransitionError.InvalidSlotIndex;
+        }
+        if (source_slot >= state.historical_block_hashes.len()) {
+            return StateTransitionError.InvalidSlotIndex;
+        }
+        if (target_slot >= state.historical_block_hashes.len()) {
+            return StateTransitionError.InvalidSlotIndex;
+        }
+
+        // Validate vote conditions
+        const is_source_justified = try state.justified_slots.get(source_slot);
+        const is_target_already_justified = try state.justified_slots.get(target_slot);
+        const has_correct_source_root = std.mem.eql(u8, &vote.source.root, &(try state.historical_block_hashes.get(source_slot)));
+        const has_correct_target_root = std.mem.eql(u8, &vote.target.root, &(try state.historical_block_hashes.get(target_slot)));
+        const target_not_ahead = target_slot <= source_slot; // Skip if target <= source (invalid)
+        const is_target_justifiable = try is_justifiable_slot(state.latest_finalized.slot, target_slot);
+
+        // Skip invalid votes
+        if (!is_source_justified or
+            is_target_already_justified or
+            !has_correct_source_root or
+            !has_correct_target_root or
+            target_not_ahead or
+            !is_target_justifiable)
+        {
+            logger.debug("skipping the vote as not viable: !(source_justified={}) or target_already_justified={} !(correct_source_root={}) or !(correct_target_root={}) or target_not_ahead={} or !(target_justifiable={})", .{
+                is_source_justified,
+                is_target_already_justified,
+                has_correct_source_root,
+                has_correct_target_root,
+                target_not_ahead,
+                is_target_justifiable,
+            });
+            continue;
+        }
+
+        // Validate validator ID
+        if (validator_id >= num_validators) {
+            return StateTransitionError.InvalidValidatorId;
+        }
+
+        // Get or create justification tracking for target
+        var target_justifications = justifications.get(vote.target.root) orelse targetjustifications: {
+            var targetjustifications = try allocator.alloc(u8, num_validators);
+            for (0..targetjustifications.len) |i| {
+                targetjustifications[i] = 0;
+            }
+            try justifications.put(allocator, vote.target.root, targetjustifications);
+            break :targetjustifications targetjustifications;
+        };
+
+        // Record this validator's vote for the target
+        target_justifications[validator_id] = 1;
+        try justifications.put(allocator, vote.target.root, target_justifications);
+
+        // Count votes for this target
+        var target_justifications_count: usize = 0;
+        for (target_justifications) |justified| {
+            if (justified == 1) {
+                target_justifications_count += 1;
+            }
+        }
+        logger.debug("target jcount={d}: {any} justifications={any}\n", .{ target_justifications_count, vote.target.root, target_justifications });
+
+        // Check if target has reached 2/3 majority (justification threshold)
+        if (3 * target_justifications_count >= 2 * num_validators) {
+            state.latest_justified = vote.target;
+            try state.justified_slots.set(target_slot, true);
+            _ = justifications.remove(vote.target.root);
+
+            const justified_str_new = try state.latest_justified.toJsonString(allocator);
+            defer allocator.free(justified_str_new);
+            logger.debug("\n\n\n-----------------HURRAY JUSTIFICATION ------------\n{s}\n--------------\n---------------\n-------------------------\n\n\n", .{justified_str_new});
+
+            // Check for finalization: source is finalized if target is the next valid justifiable slot
+            var can_target_finalize = true;
+            for (source_slot + 1..target_slot) |check_slot| {
+                if (try is_justifiable_slot(state.latest_finalized.slot, check_slot)) {
+                    can_target_finalize = false;
+                    break;
+                }
+            }
+
+            logger.debug("----------------can_target_finalize ({d})={any}----------\n\n", .{ source_slot, can_target_finalize });
+            if (can_target_finalize == true) {
+                state.latest_finalized = vote.source;
+                const finalized_str_new = try state.latest_finalized.toJsonString(allocator);
+                defer allocator.free(finalized_str_new);
+                logger.debug("\n\n\n-----------------DOUBLE HURRAY FINALIZATION ------------\n{s}\n--------------\n---------------\n-------------------------\n\n\n", .{finalized_str_new});
+            }
+        }
+    }
+
+    // Update state with final justifications
+    try state.withJustifications(allocator, &justifications);
+
+    logger.debug("poststate:historical hashes={d} justified slots ={d}\n justifications_roots:{d}\n justifications_validators={d}\n", .{ state.historical_block_hashes.len(), state.justified_slots.len(), state.justifications_roots.len(), state.justifications_validators.len() });
+    const justified_str_final = try state.latest_justified.toJsonString(allocator);
+    defer allocator.free(justified_str_final);
+    const finalized_str_final = try state.latest_finalized.toJsonString(allocator);
+    defer allocator.free(finalized_str_final);
+    logger.debug("poststate: justified={s} finalized={s}", .{ justified_str_final, finalized_str_final });
+}
+
 fn process_operations(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, logger: zeam_utils.ModuleLogger) !void {
-    // 1. process attestations - now using BeamState member function
-    try state.processAttestations(allocator, block.body.attestations, logger);
+    // 1. process attestations
+    try process_attestations(allocator, state, block.body.attestations, logger);
 }
 
 fn process_block(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, logger: zeam_utils.ModuleLogger) !void {

@@ -403,7 +403,7 @@ pub const ForkChoice = struct {
             }
         }
 
-        while (!try types.BeamState.isJustifiableSlot(self.fcStore.latest_finalized.slot, nodes[target_idx].slot)) {
+        while (!try stf.is_justifiable_slot(self.fcStore.latest_finalized.slot, nodes[target_idx].slot)) {
             target_idx = nodes[target_idx].parent orelse return ForkChoiceError.InvalidTargetSearch;
         }
 
