@@ -60,11 +60,18 @@ const Metrics = struct {
     const AttestationsProcessedCounter = metrics_lib.Counter(u64);
 };
 
+/// Enum to identify which metric a timer should record to.
+pub const MetricType = enum {
+    chain_onblock,
+    block_processing,
+    state_transition,
+};
+
 /// Timer struct returned to the application.
+/// Uses enum-based dispatch to record to the appropriate histogram.
 pub const Timer = struct {
     start_time: i128,
-    histogram: *const anyopaque, // We'll store which histogram to use
-    is_chain: bool,
+    metric_type: MetricType,
 
     /// Stops the timer and records the duration in the histogram.
     pub fn observe(self: Timer) f32 {
@@ -74,10 +81,10 @@ pub const Timer = struct {
         // For freestanding targets where we can't measure time, just record 0
         const duration_seconds = if (duration_ns == 0) 0.0 else @as(f32, @floatFromInt(duration_ns)) / 1_000_000_000.0;
 
-        if (self.is_chain) {
-            metrics.chain_onblock_duration_seconds.observe(duration_seconds);
-        } else {
-            metrics.block_processing_duration_seconds.observe(duration_seconds);
+        switch (self.metric_type) {
+            .chain_onblock => metrics.chain_onblock_duration_seconds.observe(duration_seconds),
+            .block_processing => metrics.block_processing_duration_seconds.observe(duration_seconds),
+            .state_transition => metrics.lean_state_transition_time_seconds.observe(duration_seconds),
         }
 
         return duration_seconds;
@@ -86,21 +93,20 @@ pub const Timer = struct {
 
 /// A wrapper struct that exposes a `start` function to match the existing API.
 pub const Histogram = struct {
-    is_chain: bool,
+    metric_type: MetricType,
 
     pub fn start(self: *const Histogram) Timer {
         return Timer{
             .start_time = getTimestamp(),
-            .histogram = undefined, // Not used in this implementation
-            .is_chain = self.is_chain,
+            .metric_type = self.metric_type,
         };
     }
 };
 
 /// The public variables the application interacts with.
 /// Calling `.start()` on these will start a new timer.
-pub var chain_onblock_duration_seconds: Histogram = Histogram{ .is_chain = true };
-pub var block_processing_duration_seconds: Histogram = Histogram{ .is_chain = false };
+pub var chain_onblock_duration_seconds: Histogram = Histogram{ .metric_type = .chain_onblock };
+pub var block_processing_duration_seconds: Histogram = Histogram{ .metric_type = .block_processing };
 
 /// Initializes the metrics system. Must be called once at startup.
 pub fn init(allocator: std.mem.Allocator) !void {
@@ -207,30 +213,13 @@ pub fn observeAttestationsProcessingTime(duration_seconds: f32) void {
     metrics.lean_state_transition_attestations_processing_time_seconds.observe(duration_seconds);
 }
 
-/// Timer specifically for state transition duration measurements.
-pub const StateTransitionTimer = struct {
-    start_time: i128,
-
-    /// Stops the timer and records the duration in the state transition histogram.
-    pub fn observe(self: StateTransitionTimer) f32 {
-        const end_time = getTimestamp();
-        const duration_ns = end_time - self.start_time;
-
-        // For freestanding targets where we can't measure time, just record 0
-        const duration_seconds = if (duration_ns == 0) 0.0 else @as(f32, @floatFromInt(duration_ns)) / 1_000_000_000.0;
-
-        metrics.lean_state_transition_time_seconds.observe(duration_seconds);
-
-        return duration_seconds;
-    }
-};
-
 /// Starts a timer for measuring state transition duration.
 /// Call .observe() on the returned timer to record the measurement.
 /// Note: Automatically no-op if metrics are not initialized or running on ZKVM.
-pub fn startStateTransitionTimer() StateTransitionTimer {
-    return StateTransitionTimer{
+pub fn startStateTransitionTimer() Timer {
+    return Timer{
         .start_time = getTimestamp(),
+        .metric_type = .state_transition,
     };
 }
 

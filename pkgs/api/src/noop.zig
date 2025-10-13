@@ -62,15 +62,8 @@ pub fn observeAttestationsProcessingTime(duration_seconds: f32) void {
     _ = duration_seconds;
 }
 
-pub const StateTransitionTimer = struct {
-    pub fn observe(self: StateTransitionTimer) f32 {
-        _ = self;
-        return 0;
-    }
-};
-
-pub fn startStateTransitionTimer() StateTransitionTimer {
-    return StateTransitionTimer{};
+pub fn startStateTransitionTimer() Timer {
+    return Timer{};
 }
 
 pub fn chain_onblock_duration_seconds_start() Timer {
