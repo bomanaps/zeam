@@ -484,10 +484,101 @@ pub const ForkChoice = struct {
         return self.safeTarget;
     }
 
+    /// Validate incoming attestation before processing.
+    pub fn validateAttestation(self: *Self, signed_vote: types.SignedVote) !void {
+        const vote = signed_vote.message;
+
+        // 1. Validate that source, target, and head blocks exist in proto array
+        const source_idx = self.protoArray.indices.get(vote.source.root) orelse {
+            self.logger.debug("Attestation validation failed: unknown source block root=0x{s}", .{
+                std.fmt.fmtSliceHexLower(&vote.source.root),
+            });
+            return ForkChoiceError.UnknownSourceBlock;
+        };
+
+        const target_idx = self.protoArray.indices.get(vote.target.root) orelse {
+            self.logger.debug("Attestation validation failed: unknown target block root=0x{s}", .{
+                std.fmt.fmtSliceHexLower(&vote.target.root),
+            });
+            return ForkChoiceError.UnknownTargetBlock;
+        };
+
+        const head_idx = self.protoArray.indices.get(vote.head.root) orelse {
+            self.logger.debug("Attestation validation failed: unknown head block root=0x{s}", .{
+                std.fmt.fmtSliceHexLower(&vote.head.root),
+            });
+            return ForkChoiceError.UnknownHeadBlock;
+        };
+
+        const source_block = self.protoArray.nodes.items[source_idx];
+        const target_block = self.protoArray.nodes.items[target_idx];
+        const head_block = self.protoArray.nodes.items[head_idx];
+        _ = head_block; // Will be used in future validations
+
+        // 2. Validate slot relationships
+        if (source_block.slot > target_block.slot) {
+            self.logger.debug("Attestation validation failed: source slot {d} > target slot {d}", .{
+                source_block.slot,
+                target_block.slot,
+            });
+            return ForkChoiceError.SourceSlotExceedsTarget;
+        }
+
+        //    This corresponds to leanSpec's: assert vote.source.slot <= vote.target.slot
+        if (vote.source.slot > vote.target.slot) {
+            self.logger.debug("Attestation validation failed: source checkpoint slot {d} > target checkpoint slot {d}", .{
+                vote.source.slot,
+                vote.target.slot,
+            });
+            return ForkChoiceError.SourceCheckpointExceedsTarget;
+        }
+
+        // 3. Validate checkpoint slots match block slots
+        if (source_block.slot != vote.source.slot) {
+            self.logger.debug("Attestation validation failed: source block slot {d} != source checkpoint slot {d}", .{
+                source_block.slot,
+                vote.source.slot,
+            });
+            return ForkChoiceError.SourceCheckpointSlotMismatch;
+        }
+
+        //    This corresponds to leanSpec's: assert target_block.slot == vote.target.slot
+        if (target_block.slot != vote.target.slot) {
+            self.logger.debug("Attestation validation failed: target block slot {d} != target checkpoint slot {d}", .{
+                target_block.slot,
+                vote.target.slot,
+            });
+            return ForkChoiceError.TargetCheckpointSlotMismatch;
+        }
+
+        // 4. Validate attestation is not too far in the future
+        //    current_slot = Slot(self.time // SECONDS_PER_INTERVAL)
+        //    assert vote.slot <= Slot(current_slot + Slot(1))
+        const max_allowed_slot = self.fcStore.timeSlots + 1;
+        if (vote.slot > max_allowed_slot) {
+            self.logger.debug("Attestation validation failed: vote slot {d} > max allowed slot {d}", .{
+                vote.slot,
+                max_allowed_slot,
+            });
+            return ForkChoiceError.AttestationTooFarInFuture;
+        }
+
+        self.logger.debug("Attestation validation passed: validator={d} slot={d} source={d} target={d}", .{
+            signed_vote.validator_id,
+            vote.slot,
+            vote.source.slot,
+            vote.target.slot,
+        });
+    }
+
     pub fn onAttestation(self: *Self, signed_vote: types.SignedVote, is_from_block: bool) !void {
+        // Validate attestation structure and constraints first
+        try self.validateAttestation(signed_vote);
+
         // vote has to be of an ancestor of the current slot
         const validator_id = signed_vote.validator_id;
         const vote = signed_vote.message;
+        // This get should never fail after validation, but we keep the check for safety
         const new_head_index = self.protoArray.indices.get(vote.head.root) orelse return ForkChoiceError.InvalidAttestation;
 
         var vote_tracker = self.votes.get(validator_id) orelse VoteTracker{};
@@ -583,11 +674,30 @@ pub const ForkChoice = struct {
     }
 };
 
-const ForkChoiceError = error{ NotImplemented, UnknownParent, FutureSlot, InvalidFutureAttestation,
-    //
-    InvalidOnChainAttestation, PreFinalizedSlot, NotFinalizedDesendant, InvalidAttestation, InvalidDeltas,
-    //
-    InvalidJustifiedRoot, InvalidBestDescendant, InvalidHeadIndex, InvalidTargetSearch };
+const ForkChoiceError = error{
+    NotImplemented,
+    UnknownParent,
+    FutureSlot,
+    InvalidFutureAttestation,
+    InvalidOnChainAttestation,
+    PreFinalizedSlot,
+    NotFinalizedDesendant,
+    InvalidAttestation,
+    InvalidDeltas,
+    InvalidJustifiedRoot,
+    InvalidBestDescendant,
+    InvalidHeadIndex,
+    InvalidTargetSearch,
+    // Attestation validation errors
+    UnknownSourceBlock,
+    UnknownTargetBlock,
+    UnknownHeadBlock,
+    SourceSlotExceedsTarget,
+    SourceCheckpointExceedsTarget,
+    SourceCheckpointSlotMismatch,
+    TargetCheckpointSlotMismatch,
+    AttestationTooFarInFuture,
+};
 
 test "forkchoice block tree" {
     var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -637,4 +747,425 @@ test "forkchoice block tree" {
         const searched_idx = fork_choice.protoArray.indices.get(mock_chain.blockRoots[i]);
         try std.testing.expect(searched_idx == i);
     }
+}
+
+// Attestation Validation Tests
+// These tests align with leanSpec's test_attestation_processing.py
+
+test "attestation validation - valid attestation" {
+    // Test that a valid attestation passes all validation checks
+    var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_allocator.deinit();
+    const allocator = arena_allocator.allocator();
+
+    const chain_spec =
+        \\{"preset": "mainnet", "name": "beamdev", "genesis_time": 1234, "num_validators": 4}
+    ;
+    const options = json.ParseOptions{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_if_needed,
+    };
+    const parsed_chain_spec = (try json.parseFromSlice(configs.ChainOptions, allocator, chain_spec, options)).value;
+    const chain_config = try configs.ChainConfig.init(configs.Chain.custom, parsed_chain_spec);
+
+    const mock_chain = try stf.genMockChain(allocator, 3, chain_config.genesis);
+    var beam_state = mock_chain.genesis_state;
+    var zeam_logger_config = zeam_utils.getTestLoggerConfig();
+    const module_logger = zeam_logger_config.logger(.forkchoice);
+    var fork_choice = try ForkChoice.init(allocator, .{
+        .config = chain_config,
+        .anchorState = &beam_state,
+        .logger = module_logger,
+    });
+
+    // Add blocks to forkchoice
+    for (1..mock_chain.blocks.len) |i| {
+        const block = mock_chain.blocks[i];
+        try stf.apply_transition(allocator, &beam_state, block, .{ .logger = module_logger });
+        try fork_choice.onInterval(block.message.slot * constants.INTERVALS_PER_SLOT, false);
+        _ = try fork_choice.onBlock(block.message, &beam_state, .{ .currentSlot = block.message.slot, .blockDelayMs = 0 });
+    }
+
+    // Create a valid attestation
+    const source_slot: types.Slot = 1;
+    const target_slot: types.Slot = 2;
+    const valid_vote = types.SignedVote{
+        .validator_id = 0,
+        .message = types.Mini3SFVote{
+            .slot = target_slot,
+            .head = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[target_slot],
+                .slot = target_slot,
+            },
+            .source = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[source_slot],
+                .slot = source_slot,
+            },
+            .target = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[target_slot],
+                .slot = target_slot,
+            },
+        },
+        .signature = [_]u8{0} ** types.SIGSIZE,
+    };
+
+    // This should pass validation
+    try fork_choice.validateAttestation(valid_vote);
+}
+
+test "attestation validation - unknown source block" {
+    // Test that validation fails when source block is not in proto array
+    var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_allocator.deinit();
+    const allocator = arena_allocator.allocator();
+
+    const chain_spec =
+        \\{"preset": "mainnet", "name": "beamdev", "genesis_time": 1234, "num_validators": 4}
+    ;
+    const options = json.ParseOptions{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_if_needed,
+    };
+    const parsed_chain_spec = (try json.parseFromSlice(configs.ChainOptions, allocator, chain_spec, options)).value;
+    const chain_config = try configs.ChainConfig.init(configs.Chain.custom, parsed_chain_spec);
+
+    const mock_chain = try stf.genMockChain(allocator, 2, chain_config.genesis);
+    var beam_state = mock_chain.genesis_state;
+    var zeam_logger_config = zeam_utils.getTestLoggerConfig();
+    const module_logger = zeam_logger_config.logger(.forkchoice);
+    var fork_choice = try ForkChoice.init(allocator, .{
+        .config = chain_config,
+        .anchorState = &beam_state,
+        .logger = module_logger,
+    });
+
+    // Add one block
+    const block = mock_chain.blocks[1];
+    try stf.apply_transition(allocator, &beam_state, block, .{ .logger = module_logger });
+    try fork_choice.onInterval(block.message.slot * constants.INTERVALS_PER_SLOT, false);
+    _ = try fork_choice.onBlock(block.message, &beam_state, .{ .currentSlot = block.message.slot, .blockDelayMs = 0 });
+
+    // Create attestation with unknown source block
+    const unknown_root = [_]u8{0xFF} ** 32;
+    const invalid_vote = types.SignedVote{
+        .validator_id = 0,
+        .message = types.Mini3SFVote{
+            .slot = 1,
+            .head = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[1],
+                .slot = 1,
+            },
+            .source = types.Mini3SFCheckpoint{
+                .root = unknown_root, // Unknown block
+                .slot = 0,
+            },
+            .target = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[1],
+                .slot = 1,
+            },
+        },
+        .signature = [_]u8{0} ** types.SIGSIZE,
+    };
+
+    // Should fail with UnknownSourceBlock error
+    try std.testing.expectError(error.UnknownSourceBlock, fork_choice.validateAttestation(invalid_vote));
+}
+
+test "attestation validation - unknown target block" {
+    // Test that validation fails when target block is not in proto array
+    var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_allocator.deinit();
+    const allocator = arena_allocator.allocator();
+
+    const chain_spec =
+        \\{"preset": "mainnet", "name": "beamdev", "genesis_time": 1234, "num_validators": 4}
+    ;
+    const options = json.ParseOptions{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_if_needed,
+    };
+    const parsed_chain_spec = (try json.parseFromSlice(configs.ChainOptions, allocator, chain_spec, options)).value;
+    const chain_config = try configs.ChainConfig.init(configs.Chain.custom, parsed_chain_spec);
+
+    const mock_chain = try stf.genMockChain(allocator, 2, chain_config.genesis);
+    var beam_state = mock_chain.genesis_state;
+    var zeam_logger_config = zeam_utils.getTestLoggerConfig();
+    const module_logger = zeam_logger_config.logger(.forkchoice);
+    var fork_choice = try ForkChoice.init(allocator, .{
+        .config = chain_config,
+        .anchorState = &beam_state,
+        .logger = module_logger,
+    });
+
+    // Add one block
+    const block = mock_chain.blocks[1];
+    try stf.apply_transition(allocator, &beam_state, block, .{ .logger = module_logger });
+    try fork_choice.onInterval(block.message.slot * constants.INTERVALS_PER_SLOT, false);
+    _ = try fork_choice.onBlock(block.message, &beam_state, .{ .currentSlot = block.message.slot, .blockDelayMs = 0 });
+
+    // Create attestation with unknown target block
+    const unknown_root = [_]u8{0xFF} ** 32;
+    const invalid_vote = types.SignedVote{
+        .validator_id = 0,
+        .message = types.Mini3SFVote{
+            .slot = 1,
+            .head = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[1],
+                .slot = 1,
+            },
+            .source = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[0],
+                .slot = 0,
+            },
+            .target = types.Mini3SFCheckpoint{
+                .root = unknown_root, // Unknown block
+                .slot = 2,
+            },
+        },
+        .signature = [_]u8{0} ** types.SIGSIZE,
+    };
+
+    // Should fail with UnknownTargetBlock error
+    try std.testing.expectError(error.UnknownTargetBlock, fork_choice.validateAttestation(invalid_vote));
+}
+
+test "attestation validation - source slot exceeds target slot" {
+    // Test that validation fails when source block slot > target block slot
+    var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_allocator.deinit();
+    const allocator = arena_allocator.allocator();
+
+    const chain_spec =
+        \\{"preset": "mainnet", "name": "beamdev", "genesis_time": 1234, "num_validators": 4}
+    ;
+    const options = json.ParseOptions{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_if_needed,
+    };
+    const parsed_chain_spec = (try json.parseFromSlice(configs.ChainOptions, allocator, chain_spec, options)).value;
+    const chain_config = try configs.ChainConfig.init(configs.Chain.custom, parsed_chain_spec);
+
+    const mock_chain = try stf.genMockChain(allocator, 3, chain_config.genesis);
+    var beam_state = mock_chain.genesis_state;
+    var zeam_logger_config = zeam_utils.getTestLoggerConfig();
+    const module_logger = zeam_logger_config.logger(.forkchoice);
+    var fork_choice = try ForkChoice.init(allocator, .{
+        .config = chain_config,
+        .anchorState = &beam_state,
+        .logger = module_logger,
+    });
+
+    // Add blocks to forkchoice
+    for (1..mock_chain.blocks.len) |i| {
+        const block = mock_chain.blocks[i];
+        try stf.apply_transition(allocator, &beam_state, block, .{ .logger = module_logger });
+        try fork_choice.onInterval(block.message.slot * constants.INTERVALS_PER_SLOT, false);
+        _ = try fork_choice.onBlock(block.message, &beam_state, .{ .currentSlot = block.message.slot, .blockDelayMs = 0 });
+    }
+
+    // Create attestation where source slot (2) > target slot (1) - invalid ordering
+    const invalid_vote = types.SignedVote{
+        .validator_id = 0,
+        .message = types.Mini3SFVote{
+            .slot = 2,
+            .head = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[1],
+                .slot = 1,
+            },
+            .source = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[2], // Later slot
+                .slot = 2,
+            },
+            .target = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[1], // Earlier slot
+                .slot = 1,
+            },
+        },
+        .signature = [_]u8{0} ** types.SIGSIZE,
+    };
+
+    // Should fail with SourceSlotExceedsTarget error
+    try std.testing.expectError(error.SourceSlotExceedsTarget, fork_choice.validateAttestation(invalid_vote));
+}
+
+test "attestation validation - checkpoint slot mismatch" {
+    // Test that validation fails when checkpoint slots don't match block slots
+    var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_allocator.deinit();
+    const allocator = arena_allocator.allocator();
+
+    const chain_spec =
+        \\{"preset": "mainnet", "name": "beamdev", "genesis_time": 1234, "num_validators": 4}
+    ;
+    const options = json.ParseOptions{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_if_needed,
+    };
+    const parsed_chain_spec = (try json.parseFromSlice(configs.ChainOptions, allocator, chain_spec, options)).value;
+    const chain_config = try configs.ChainConfig.init(configs.Chain.custom, parsed_chain_spec);
+
+    const mock_chain = try stf.genMockChain(allocator, 3, chain_config.genesis);
+    var beam_state = mock_chain.genesis_state;
+    var zeam_logger_config = zeam_utils.getTestLoggerConfig();
+    const module_logger = zeam_logger_config.logger(.forkchoice);
+    var fork_choice = try ForkChoice.init(allocator, .{
+        .config = chain_config,
+        .anchorState = &beam_state,
+        .logger = module_logger,
+    });
+
+    // Add blocks to forkchoice
+    for (1..mock_chain.blocks.len) |i| {
+        const block = mock_chain.blocks[i];
+        try stf.apply_transition(allocator, &beam_state, block, .{ .logger = module_logger });
+        try fork_choice.onInterval(block.message.slot * constants.INTERVALS_PER_SLOT, false);
+        _ = try fork_choice.onBlock(block.message, &beam_state, .{ .currentSlot = block.message.slot, .blockDelayMs = 0 });
+    }
+
+    // Create attestation where source checkpoint slot doesn't match block slot
+    const invalid_vote = types.SignedVote{
+        .validator_id = 0,
+        .message = types.Mini3SFVote{
+            .slot = 2,
+            .head = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[2],
+                .slot = 2,
+            },
+            .source = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[1],
+                .slot = 0, // Mismatch: block is at slot 1, checkpoint says slot 0
+            },
+            .target = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[2],
+                .slot = 2,
+            },
+        },
+        .signature = [_]u8{0} ** types.SIGSIZE,
+    };
+
+    // Should fail with SourceCheckpointSlotMismatch error
+    try std.testing.expectError(error.SourceCheckpointSlotMismatch, fork_choice.validateAttestation(invalid_vote));
+}
+
+test "attestation validation - attestation too far in future" {
+    // Test that validation fails for attestations too far in the future
+    var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_allocator.deinit();
+    const allocator = arena_allocator.allocator();
+
+    const chain_spec =
+        \\{"preset": "mainnet", "name": "beamdev", "genesis_time": 1234, "num_validators": 4}
+    ;
+    const options = json.ParseOptions{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_if_needed,
+    };
+    const parsed_chain_spec = (try json.parseFromSlice(configs.ChainOptions, allocator, chain_spec, options)).value;
+    const chain_config = try configs.ChainConfig.init(configs.Chain.custom, parsed_chain_spec);
+
+    const mock_chain = try stf.genMockChain(allocator, 2, chain_config.genesis);
+    var beam_state = mock_chain.genesis_state;
+    var zeam_logger_config = zeam_utils.getTestLoggerConfig();
+    const module_logger = zeam_logger_config.logger(.forkchoice);
+    var fork_choice = try ForkChoice.init(allocator, .{
+        .config = chain_config,
+        .anchorState = &beam_state,
+        .logger = module_logger,
+    });
+
+    // Add one block (slot 1)
+    const block = mock_chain.blocks[1];
+    try stf.apply_transition(allocator, &beam_state, block, .{ .logger = module_logger });
+    try fork_choice.onInterval(block.message.slot * constants.INTERVALS_PER_SLOT, false);
+    _ = try fork_choice.onBlock(block.message, &beam_state, .{ .currentSlot = block.message.slot, .blockDelayMs = 0 });
+
+    // Current time is at slot 1, so max allowed attestation slot is 2 (current + 1)
+    // Create attestation for slot 100 (too far in future)
+    const future_vote = types.SignedVote{
+        .validator_id = 0,
+        .message = types.Mini3SFVote{
+            .slot = 100, // Way too far in the future
+            .head = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[1],
+                .slot = 1,
+            },
+            .source = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[0],
+                .slot = 0,
+            },
+            .target = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[1],
+                .slot = 1,
+            },
+        },
+        .signature = [_]u8{0} ** types.SIGSIZE,
+    };
+
+    // Should fail with AttestationTooFarInFuture error
+    try std.testing.expectError(error.AttestationTooFarInFuture, fork_choice.validateAttestation(future_vote));
+}
+
+test "attestation processing - valid block attestation" {
+    // Test that valid attestations from blocks are processed correctly
+    var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_allocator.deinit();
+    const allocator = arena_allocator.allocator();
+
+    const chain_spec =
+        \\{"preset": "mainnet", "name": "beamdev", "genesis_time": 1234, "num_validators": 4}
+    ;
+    const options = json.ParseOptions{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_if_needed,
+    };
+    const parsed_chain_spec = (try json.parseFromSlice(configs.ChainOptions, allocator, chain_spec, options)).value;
+    const chain_config = try configs.ChainConfig.init(configs.Chain.custom, parsed_chain_spec);
+
+    const mock_chain = try stf.genMockChain(allocator, 3, chain_config.genesis);
+    var beam_state = mock_chain.genesis_state;
+    var zeam_logger_config = zeam_utils.getTestLoggerConfig();
+    const module_logger = zeam_logger_config.logger(.forkchoice);
+    var fork_choice = try ForkChoice.init(allocator, .{
+        .config = chain_config,
+        .anchorState = &beam_state,
+        .logger = module_logger,
+    });
+
+    // Add blocks to forkchoice
+    for (1..mock_chain.blocks.len) |i| {
+        const block = mock_chain.blocks[i];
+        try stf.apply_transition(allocator, &beam_state, block, .{ .logger = module_logger });
+        try fork_choice.onInterval(block.message.slot * constants.INTERVALS_PER_SLOT, false);
+        _ = try fork_choice.onBlock(block.message, &beam_state, .{ .currentSlot = block.message.slot, .blockDelayMs = 0 });
+    }
+
+    // Create a valid attestation
+    const valid_vote = types.SignedVote{
+        .validator_id = 1,
+        .message = types.Mini3SFVote{
+            .slot = 2,
+            .head = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[2],
+                .slot = 2,
+            },
+            .source = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[1],
+                .slot = 1,
+            },
+            .target = types.Mini3SFCheckpoint{
+                .root = mock_chain.blockRoots[2],
+                .slot = 2,
+            },
+        },
+        .signature = [_]u8{0} ** types.SIGSIZE,
+    };
+
+    // Process as block attestation (is_from_block = true)
+    try fork_choice.onAttestation(valid_vote, true);
+
+    // Verify the vote was recorded in latestKnown
+    const vote_tracker = fork_choice.votes.get(1);
+    try std.testing.expect(vote_tracker != null);
+    try std.testing.expect(vote_tracker.?.latestKnown != null);
+    try std.testing.expect(vote_tracker.?.latestKnown.?.slot == 2);
 }
