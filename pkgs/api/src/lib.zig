@@ -112,11 +112,24 @@ fn observeStateTransition(ctx: *anyopaque, value: f32) void {
     histogram.observe(value);
 }
 
+// No-op observe function for when metrics are not initialized
+fn observeNoop(ctx: *anyopaque, value: f32) void {
+    _ = ctx;
+    _ = value;
+}
+
 /// The public variables the application interacts with.
 /// Calling `.start()` on these will start a new timer.
-/// Initialized in init() after the metrics are created.
-pub var chain_onblock_duration_seconds: Histogram = undefined;
-pub var block_processing_duration_seconds: Histogram = undefined;
+/// Initialized with no-op defaults; properly initialized in init() after the metrics are created.
+/// This allows them to be used safely even if init() is never called (e.g., in tests).
+pub var chain_onblock_duration_seconds: Histogram = .{
+    .context = undefined,
+    .observeFn = &observeNoop,
+};
+pub var block_processing_duration_seconds: Histogram = .{
+    .context = undefined,
+    .observeFn = &observeNoop,
+};
 
 /// Initializes the metrics system. Must be called once at startup.
 pub fn init(allocator: std.mem.Allocator) !void {
