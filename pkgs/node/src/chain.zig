@@ -207,22 +207,19 @@ pub const BeamChain = struct {
         self.module_logger.debug("node-{d}::going for block production opts={any} raw block={s}", .{ self.nodeId, opts, block_str });
 
         // 2. apply STF to get post state & update post state root & cache it
-        const stf_timer = api.startStateTransitionTimer();
+        const stf_timer = api.chain_onblock_duration_seconds.start();
         try stf.apply_raw_block(self.allocator, post_state, &block, self.block_building_logger, .{
             .logger = self.block_building_logger,
-            .recordSlotsProcessingTime = &api.observeSlotsProcessingTime,
-            .recordBlockProcessingTime = &api.observeBlockProcessingTime,
-            .recordAttestationsProcessingTime = &api.observeAttestationsProcessingTime,
         });
         _ = stf_timer.observe();
 
         // Update metrics after state transition
         const slots_processed = post_state.slot - parent_slot;
         const attestations_count = block.body.attestations.constSlice().len;
-        api.addSlotsProcessed(slots_processed);
-        api.addAttestationsProcessed(attestations_count);
-        api.setLeanLatestJustifiedSlot(post_state.latest_justified.slot);
-        api.setLeanLatestFinalizedSlot(post_state.latest_finalized.slot);
+        api.metrics.lean_state_transition_slots_processed_total.incrBy(slots_processed);
+        api.metrics.lean_state_transition_attestations_processed_total.incrBy(attestations_count);
+        api.metrics.lean_latest_justified_slot.set(post_state.latest_justified.slot);
+        api.metrics.lean_latest_finalized_slot.set(post_state.latest_finalized.slot);
 
         block_json = try block.toJson(self.allocator);
         const block_str_2 = try jsonToString(self.allocator, block_json);
@@ -424,7 +421,6 @@ pub const BeamChain = struct {
             });
             break :computedstate cpost_state;
         };
-
         // 3. fc onblock
         const fcBlock = try self.forkChoice.onBlock(block, post_state, .{
             .currentSlot = block.slot,
