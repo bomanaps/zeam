@@ -31,7 +31,8 @@ fn getTimestamp() i128 {
 // Note: Metrics are initialized as no-op by default. When init() is not called,
 // or when called on ZKVM targets, all metric operations are no-ops automatically.
 // This design eliminates the need for conditional checks in metric recording functions.
-var metrics = metrics_lib.initializeNoop(Metrics);
+// Public so that callers can directly access and record metrics without wrapper functions.
+pub var metrics = metrics_lib.initializeNoop(Metrics);
 var g_initialized: bool = false;
 
 const Metrics = struct {
@@ -60,18 +61,12 @@ const Metrics = struct {
     const AttestationsProcessedCounter = metrics_lib.Counter(u64);
 };
 
-/// Enum to identify which metric a timer should record to.
-pub const MetricType = enum {
-    chain_onblock,
-    block_processing,
-    state_transition,
-};
-
 /// Timer struct returned to the application.
-/// Uses enum-based dispatch to record to the appropriate histogram.
+/// Uses a function pointer to record to the appropriate histogram via type erasure.
 pub const Timer = struct {
     start_time: i128,
-    metric_type: MetricType,
+    context: *anyopaque,
+    observeFn: *const fn (*anyopaque, f32) void,
 
     /// Stops the timer and records the duration in the histogram.
     pub fn observe(self: Timer) f32 {
@@ -81,11 +76,7 @@ pub const Timer = struct {
         // For freestanding targets where we can't measure time, just record 0
         const duration_seconds = if (duration_ns == 0) 0.0 else @as(f32, @floatFromInt(duration_ns)) / 1_000_000_000.0;
 
-        switch (self.metric_type) {
-            .chain_onblock => metrics.chain_onblock_duration_seconds.observe(duration_seconds),
-            .block_processing => metrics.block_processing_duration_seconds.observe(duration_seconds),
-            .state_transition => metrics.lean_state_transition_time_seconds.observe(duration_seconds),
-        }
+        self.observeFn(self.context, duration_seconds);
 
         return duration_seconds;
     }
@@ -93,20 +84,39 @@ pub const Timer = struct {
 
 /// A wrapper struct that exposes a `start` function to match the existing API.
 pub const Histogram = struct {
-    metric_type: MetricType,
+    context: *anyopaque,
+    observeFn: *const fn (*anyopaque, f32) void,
 
     pub fn start(self: *const Histogram) Timer {
         return Timer{
             .start_time = getTimestamp(),
-            .metric_type = self.metric_type,
+            .context = self.context,
+            .observeFn = self.observeFn,
         };
     }
 };
 
+// Type-erased observe functions for each histogram type
+fn observeChainOnblock(ctx: *anyopaque, value: f32) void {
+    const histogram: *Metrics.ChainHistogram = @ptrCast(@alignCast(ctx));
+    histogram.observe(value);
+}
+
+fn observeBlockProcessing(ctx: *anyopaque, value: f32) void {
+    const histogram: *Metrics.BlockProcessingHistogram = @ptrCast(@alignCast(ctx));
+    histogram.observe(value);
+}
+
+fn observeStateTransition(ctx: *anyopaque, value: f32) void {
+    const histogram: *Metrics.StateTransitionHistogram = @ptrCast(@alignCast(ctx));
+    histogram.observe(value);
+}
+
 /// The public variables the application interacts with.
 /// Calling `.start()` on these will start a new timer.
-pub var chain_onblock_duration_seconds: Histogram = Histogram{ .metric_type = .chain_onblock };
-pub var block_processing_duration_seconds: Histogram = Histogram{ .metric_type = .block_processing };
+/// Initialized in init() after the metrics are created.
+pub var chain_onblock_duration_seconds: Histogram = undefined;
+pub var block_processing_duration_seconds: Histogram = undefined;
 
 /// Initializes the metrics system. Must be called once at startup.
 pub fn init(allocator: std.mem.Allocator) !void {
@@ -134,6 +144,16 @@ pub fn init(allocator: std.mem.Allocator) !void {
         .lean_state_transition_attestations_processing_time_seconds = Metrics.AttestationsProcessingHistogram.init("lean_state_transition_attestations_processing_time_seconds", .{ .help = "Time taken to process attestations." }, .{}),
     };
 
+    // Initialize histogram wrappers with pointers to the actual metrics
+    chain_onblock_duration_seconds = Histogram{
+        .context = @ptrCast(&metrics.chain_onblock_duration_seconds),
+        .observeFn = &observeChainOnblock,
+    };
+    block_processing_duration_seconds = Histogram{
+        .context = @ptrCast(&metrics.block_processing_duration_seconds),
+        .observeFn = &observeBlockProcessing,
+    };
+
     g_initialized = true;
 }
 
@@ -156,74 +176,3 @@ pub const routes = @import("./routes.zig");
 // Event system modules
 pub const events = @import("./events.zig");
 pub const event_broadcaster = @import("./event_broadcaster.zig");
-
-/// Sets the lean head slot metric.
-/// This should be called whenever the fork choice head is updated.
-/// Note: Automatically no-op if metrics are not initialized or running on ZKVM.
-pub fn setLeanHeadSlot(slot: u64) void {
-    metrics.lean_head_slot.set(slot);
-}
-
-/// Sets the lean latest justified slot metric.
-/// This should be called after state transitions complete.
-/// Note: Automatically no-op if metrics are not initialized or running on ZKVM.
-pub fn setLeanLatestJustifiedSlot(slot: u64) void {
-    metrics.lean_latest_justified_slot.set(slot);
-}
-
-/// Sets the lean latest finalized slot metric.
-/// This should be called after state transitions complete.
-/// Note: Automatically no-op if metrics are not initialized or running on ZKVM.
-pub fn setLeanLatestFinalizedSlot(slot: u64) void {
-    metrics.lean_latest_finalized_slot.set(slot);
-}
-
-/// Increments the slots processed counter by the given amount.
-/// This should be called after state transition with the number of slots processed.
-/// Note: Automatically no-op if metrics are not initialized or running on ZKVM.
-pub fn addSlotsProcessed(count: u64) void {
-    metrics.lean_state_transition_slots_processed_total.incrBy(count);
-}
-
-/// Increments the attestations processed counter by the given amount.
-/// This should be called after state transition with the number of attestations processed.
-/// Note: Automatically no-op if metrics are not initialized or running on ZKVM.
-pub fn addAttestationsProcessed(count: u64) void {
-    metrics.lean_state_transition_attestations_processed_total.incrBy(count);
-}
-
-/// Records a slots processing time observation.
-/// This is called via callback from the state transition layer.
-/// Note: Automatically no-op if metrics are not initialized or running on ZKVM.
-pub fn observeSlotsProcessingTime(duration_seconds: f32) void {
-    metrics.lean_state_transition_slots_processing_time_seconds.observe(duration_seconds);
-}
-
-/// Records a block processing time observation.
-/// This is called via callback from the state transition layer.
-/// Note: Automatically no-op if metrics are not initialized or running on ZKVM.
-pub fn observeBlockProcessingTime(duration_seconds: f32) void {
-    metrics.lean_state_transition_block_processing_time_seconds.observe(duration_seconds);
-}
-
-/// Records an attestations processing time observation.
-/// This is called via callback from the state transition layer.
-/// Note: Automatically no-op if metrics are not initialized or running on ZKVM.
-pub fn observeAttestationsProcessingTime(duration_seconds: f32) void {
-    metrics.lean_state_transition_attestations_processing_time_seconds.observe(duration_seconds);
-}
-
-/// Starts a timer for measuring state transition duration.
-/// Call .observe() on the returned timer to record the measurement.
-/// Note: Automatically no-op if metrics are not initialized or running on ZKVM.
-pub fn startStateTransitionTimer() Timer {
-    return Timer{
-        .start_time = getTimestamp(),
-        .metric_type = .state_transition,
-    };
-}
-
-// Compatibility functions for the old API
-pub fn chain_onblock_duration_seconds_start() Timer {
-    return chain_onblock_duration_seconds.start();
-}
