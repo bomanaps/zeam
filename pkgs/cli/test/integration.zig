@@ -6,6 +6,7 @@ const std = @import("std");
 // Integration tests imported here:
 // - beam_integration_test.zig: Beam command and SSE events integration tests
 // - genesis_to_finalization_test.zig: Two-node genesis to finalization simulation test
+// - lean_quickstart_integration_test.zig: Full lean-quickstart integration test (Option B)
 //
 // Run with: zig build simtest
 
@@ -15,4 +16,7 @@ test {
 
     // Import genesis to finalization integration test (two nodes in-process)
     _ = @import("genesis_to_finalization_test.zig");
+
+    // Import lean-quickstart full integration test (Option B implementation)
+    _ = @import("lean_quickstart_integration_test.zig");
 }
