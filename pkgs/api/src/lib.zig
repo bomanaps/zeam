@@ -19,8 +19,6 @@ fn getTimestamp() i128 {
     // For freestanding targets, we might not have access to system time
     // In that case, we'll use a simple counter or return 0
     if (isZKVM()) {
-        // For freestanding environments, we can't measure real time
-        // Return 0 for now - in a real implementation you'd want a cycle counter
         return 0;
     } else {
         return std.time.nanoTimestamp();
@@ -30,7 +28,6 @@ fn getTimestamp() i128 {
 // Global metrics instance
 // Note: Metrics are initialized as no-op by default. When init() is not called,
 // or when called on ZKVM targets, all metric operations are no-ops automatically.
-// This design eliminates the need for conditional checks in metric recording functions.
 // Public so that callers can directly access and record metrics without wrapper functions.
 pub var metrics = metrics_lib.initializeNoop(Metrics);
 var g_initialized: bool = false;
@@ -62,11 +59,10 @@ const Metrics = struct {
 };
 
 /// Timer struct returned to the application.
-/// Uses a function pointer to record to the appropriate histogram via type erasure.
 pub const Timer = struct {
     start_time: i128,
-    context: *anyopaque,
-    observeFn: *const fn (*anyopaque, f32) void,
+    context: ?*anyopaque,
+    observe_impl: *const fn (?*anyopaque, f32) void,
 
     /// Stops the timer and records the duration in the histogram.
     pub fn observe(self: Timer) f32 {
@@ -76,59 +72,53 @@ pub const Timer = struct {
         // For freestanding targets where we can't measure time, just record 0
         const duration_seconds = if (duration_ns == 0) 0.0 else @as(f32, @floatFromInt(duration_ns)) / 1_000_000_000.0;
 
-        self.observeFn(self.context, duration_seconds);
+        self.observe_impl(self.context, duration_seconds);
 
         return duration_seconds;
     }
 };
 
-/// A wrapper struct that exposes a `start` function to match the existing API.
+/// Histogram wrapper for recording metric observations.
 pub const Histogram = struct {
-    context: *anyopaque,
-    observeFn: *const fn (*anyopaque, f32) void,
+    context: ?*anyopaque,
+    observe: *const fn (?*anyopaque, f32) void,
 
     pub fn start(self: *const Histogram) Timer {
         return Timer{
             .start_time = getTimestamp(),
             .context = self.context,
-            .observeFn = self.observeFn,
+            .observe_impl = self.observe,
         };
     }
 };
 
-// Type-erased observe functions for each histogram type
-fn observeChainOnblock(ctx: *anyopaque, value: f32) void {
-    const histogram: *Metrics.ChainHistogram = @ptrCast(@alignCast(ctx));
+fn observeChainOnblock(ctx: ?*anyopaque, value: f32) void {
+    const histogram_ptr = ctx orelse return; // No-op if not initialized
+    const histogram: *Metrics.ChainHistogram = @ptrCast(@alignCast(histogram_ptr));
     histogram.observe(value);
 }
 
-fn observeBlockProcessing(ctx: *anyopaque, value: f32) void {
-    const histogram: *Metrics.BlockProcessingHistogram = @ptrCast(@alignCast(ctx));
+fn observeBlockProcessing(ctx: ?*anyopaque, value: f32) void {
+    const histogram_ptr = ctx orelse return; // No-op if not initialized
+    const histogram: *Metrics.BlockProcessingHistogram = @ptrCast(@alignCast(histogram_ptr));
     histogram.observe(value);
 }
 
-fn observeStateTransition(ctx: *anyopaque, value: f32) void {
-    const histogram: *Metrics.StateTransitionHistogram = @ptrCast(@alignCast(ctx));
+fn observeStateTransition(ctx: ?*anyopaque, value: f32) void {
+    const histogram_ptr = ctx orelse return; // No-op if not initialized
+    const histogram: *Metrics.StateTransitionHistogram = @ptrCast(@alignCast(histogram_ptr));
     histogram.observe(value);
-}
-
-// No-op observe function for when metrics are not initialized
-fn observeNoop(ctx: *anyopaque, value: f32) void {
-    _ = ctx;
-    _ = value;
 }
 
 /// The public variables the application interacts with.
 /// Calling `.start()` on these will start a new timer.
-/// Initialized with no-op defaults; properly initialized in init() after the metrics are created.
-/// This allows them to be used safely even if init() is never called (e.g., in tests).
 pub var chain_onblock_duration_seconds: Histogram = .{
-    .context = undefined,
-    .observeFn = &observeNoop,
+    .context = null,
+    .observe = &observeChainOnblock,
 };
 pub var block_processing_duration_seconds: Histogram = .{
-    .context = undefined,
-    .observeFn = &observeNoop,
+    .context = null,
+    .observe = &observeBlockProcessing,
 };
 
 /// Initializes the metrics system. Must be called once at startup.
@@ -157,15 +147,9 @@ pub fn init(allocator: std.mem.Allocator) !void {
         .lean_state_transition_attestations_processing_time_seconds = Metrics.AttestationsProcessingHistogram.init("lean_state_transition_attestations_processing_time_seconds", .{ .help = "Time taken to process attestations." }, .{}),
     };
 
-    // Initialize histogram wrappers with pointers to the actual metrics
-    chain_onblock_duration_seconds = Histogram{
-        .context = @ptrCast(&metrics.chain_onblock_duration_seconds),
-        .observeFn = &observeChainOnblock,
-    };
-    block_processing_duration_seconds = Histogram{
-        .context = @ptrCast(&metrics.block_processing_duration_seconds),
-        .observeFn = &observeBlockProcessing,
-    };
+    // Set context for histogram wrappers (observe functions already assigned at compile time)
+    chain_onblock_duration_seconds.context = @ptrCast(&metrics.chain_onblock_duration_seconds);
+    block_processing_duration_seconds.context = @ptrCast(&metrics.block_processing_duration_seconds);
 
     g_initialized = true;
 }
