@@ -1,14 +1,14 @@
 const std = @import("std");
 
-fn observeNoop(ctx: *anyopaque, value: f32) void {
+fn observeNoop(ctx: ?*anyopaque, value: f32) void {
     _ = ctx;
     _ = value;
 }
 
 pub const Timer = struct {
     start_time: i128 = 0,
-    context: *anyopaque = undefined,
-    observeFn: *const fn (*anyopaque, f32) void = &observeNoop,
+    context: ?*anyopaque = null,
+    observe_impl: *const fn (?*anyopaque, f32) void = &observeNoop,
 
     pub fn observe(self: Timer) f32 {
         _ = self;
@@ -17,17 +17,12 @@ pub const Timer = struct {
 };
 
 pub const Histogram = struct {
-    context: *anyopaque = undefined,
-    observeFn: *const fn (*anyopaque, f32) void = &observeNoop,
+    context: ?*anyopaque = null,
+    observe: *const fn (?*anyopaque, f32) void = &observeNoop,
 
     pub fn start(self: *const Histogram) Timer {
         _ = self;
         return Timer{};
-    }
-
-    pub fn observe(self: *Histogram, value: f32) void {
-        _ = self;
-        _ = value;
     }
 };
 
