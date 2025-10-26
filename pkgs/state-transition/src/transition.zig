@@ -12,22 +12,6 @@ const Allocator = std.mem.Allocator;
 const debugLog = zeam_utils.zeamLog;
 const StateTransitionError = types.StateTransitionError;
 
-// Only import api for non-ZKVM targets
-const has_api = @import("builtin").target.os.tag != .freestanding;
-const api = if (has_api) @import("@zeam/api") else struct {
-    pub const metrics = struct {
-        pub const lean_state_transition_slots_processing_time_seconds = struct {
-            pub fn observe(_: f32) void {}
-        };
-        pub const lean_state_transition_block_processing_time_seconds = struct {
-            pub fn observe(_: f32) void {}
-        };
-        pub const lean_state_transition_attestations_processing_time_seconds = struct {
-            pub fn observe(_: f32) void {}
-        };
-    };
-};
-
 // put the active logs at debug level for now by default
 pub const StateTransitionOpts = struct {
     // signatures are validated outside for keeping life simple for the STF prover
@@ -58,15 +42,6 @@ fn process_slot(allocator: Allocator, state: *types.BeamState) !void {
     }
 }
 
-// Helper to get timestamp safely (returns 0 for freestanding targets)
-fn getSafeTimestamp() i128 {
-    if (@import("builtin").target.os.tag == .freestanding) {
-        return 0;
-    } else {
-        return std.time.nanoTimestamp();
-    }
-}
-
 // prepare the state to be pre state of the slot
 fn process_slots(allocator: Allocator, state: *types.BeamState, slot: types.Slot, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {
     _ = opts;
@@ -75,16 +50,14 @@ fn process_slots(allocator: Allocator, state: *types.BeamState, slot: types.Slot
         return StateTransitionError.InvalidPreState;
     }
 
-    const start_time = getSafeTimestamp();
+    const timer = zeam_metrics.lean_state_transition_slots_processing_time_seconds.start();
 
     while (state.slot < slot) {
         try process_slot(allocator, state);
         state.slot += 1;
     }
 
-    const duration_ns = getSafeTimestamp() - start_time;
-    const duration_seconds = if (duration_ns == 0) 0.0 else @as(f32, @floatFromInt(duration_ns)) / 1_000_000_000.0;
-    api.metrics.lean_state_transition_slots_processing_time_seconds.observe(duration_seconds);
+    _ = timer.observe();
 }
 
 pub fn is_justifiable_slot(finalized: types.Slot, candidate: types.Slot) !bool {
@@ -177,7 +150,7 @@ fn process_operations(allocator: Allocator, state: *types.BeamState, block: type
 
 fn process_attestations(allocator: Allocator, state: *types.BeamState, attestations: types.SignedVotes, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {
     _ = opts;
-    const start_time = getSafeTimestamp();
+    const timer = zeam_metrics.lean_state_transition_attestations_processing_time_seconds.start();
 
     logger.debug("process attestations slot={d} \n prestate:historical hashes={d} justified slots ={d} votes={d}, ", .{ state.slot, state.historical_block_hashes.len(), state.justified_slots.len(), attestations.constSlice().len });
     const justified_str = try state.latest_justified.toJsonString(allocator);
@@ -319,13 +292,11 @@ fn process_attestations(allocator: Allocator, state: *types.BeamState, attestati
 
     logger.debug("poststate: justified={s} finalized={s}", .{ justified_str_final, finalized_str_final });
 
-    const duration_ns = getSafeTimestamp() - start_time;
-    const duration_seconds = if (duration_ns == 0) 0.0 else @as(f32, @floatFromInt(duration_ns)) / 1_000_000_000.0;
-    api.metrics.lean_state_transition_attestations_processing_time_seconds.observe(duration_seconds);
+    _ = timer.observe();
 }
 
 fn process_block(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {
-    const start_time = getSafeTimestamp();
+    const timer = zeam_metrics.lean_state_transition_block_processing_time_seconds.start();
 
     // start block processing
     try process_block_header(allocator, state, block, logger);
@@ -333,9 +304,7 @@ fn process_block(allocator: Allocator, state: *types.BeamState, block: types.Bea
     // try process_execution_payload_header(state, block);
     try process_operations(allocator, state, block, logger, opts);
 
-    const duration_ns = getSafeTimestamp() - start_time;
-    const duration_seconds = if (duration_ns == 0) 0.0 else @as(f32, @floatFromInt(duration_ns)) / 1_000_000_000.0;
-    api.metrics.lean_state_transition_block_processing_time_seconds.observe(duration_seconds);
+    _ = timer.observe();
 }
 
 pub fn apply_raw_block(allocator: Allocator, state: *types.BeamState, block: *types.BeamBlock, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {

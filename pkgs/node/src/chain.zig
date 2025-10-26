@@ -9,6 +9,7 @@ const ssz = @import("ssz");
 const networks = @import("@zeam/network");
 const params = @import("@zeam/params");
 const api = @import("@zeam/api");
+const zeam_metrics = @import("@zeam/metrics");
 const database = @import("@zeam/database");
 
 const event_broadcaster = api.event_broadcaster;
@@ -216,10 +217,10 @@ pub const BeamChain = struct {
         // Update metrics after state transition
         const slots_processed = post_state.slot - parent_slot;
         const attestations_count = block.body.attestations.constSlice().len;
-        api.metrics.lean_state_transition_slots_processed_total.incrBy(slots_processed);
-        api.metrics.lean_state_transition_attestations_processed_total.incrBy(attestations_count);
-        api.metrics.lean_latest_justified_slot.set(post_state.latest_justified.slot);
-        api.metrics.lean_latest_finalized_slot.set(post_state.latest_finalized.slot);
+        zeam_metrics.metrics.lean_state_transition_slots_processed_total.incrBy(slots_processed);
+        zeam_metrics.metrics.lean_state_transition_attestations_processed_total.incrBy(attestations_count);
+        zeam_metrics.metrics.lean_latest_justified_slot.set(post_state.latest_justified.slot);
+        zeam_metrics.metrics.lean_latest_finalized_slot.set(post_state.latest_finalized.slot);
 
         block_json = try block.toJson(self.allocator);
         const block_str_2 = try jsonToString(self.allocator, block_json);
