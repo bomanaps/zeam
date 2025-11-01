@@ -1,6 +1,5 @@
 use chrono::{Datelike, Local, Timelike};
 use std::fmt::Write;
-use std::io::{self, Write as IoWrite};
 use std::sync::Mutex;
 
 const RESET: &str = "\x1b[0m";
@@ -108,7 +107,7 @@ fn log_with_level(level: LogLevel, network_id: u32, module: Option<&str>, messag
     write!(output, "{}", message).unwrap();
 
     // Write to stderr (matching Zig behavior)
-    writeln!(io::stderr(), "{}", output).unwrap();
+    eprintln!("{}", output);
 }
 
 pub fn log_debug(network_id: u32, message: &str) {
