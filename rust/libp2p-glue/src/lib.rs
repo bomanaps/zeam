@@ -148,12 +148,19 @@ pub unsafe fn publish_msg_to_rust_bridge(
     let message_slice = std::slice::from_raw_parts(message_str, message_len);
     logger::log_debug(
         network_id,
-        &format!("publishing message s={:?}..({})", hex::encode(&message_slice[..message_len.min(100)]), message_len),
+        &format!(
+            "publishing message s={:?}..({})",
+            hex::encode(&message_slice[..message_len.min(100)]),
+            message_len
+        ),
     );
     let message_data = message_slice.to_vec();
 
     if topic.is_null() {
-        logger::log_error(network_id, "null pointer passed for `topic` in publish_msg_to_rust_bridge");
+        logger::log_error(
+            network_id,
+            "null pointer passed for `topic` in publish_msg_to_rust_bridge",
+        );
         return;
     }
 
@@ -205,7 +212,10 @@ pub unsafe fn send_rpc_request(
         Err(_) => {
             logger::log_error(
                 network_id,
-                &format!("Invalid protocol tag {} provided for RPC request to {}", protocol_tag, peer_id_str),
+                &format!(
+                    "Invalid protocol tag {} provided for RPC request to {}",
+                    protocol_tag, peer_id_str
+                ),
             );
             return 0;
         }
@@ -238,7 +248,10 @@ pub unsafe fn send_rpc_request(
     logger::log_info_module(
         network_id,
         "reqresp",
-        &format!("Sent {:?} request to {} (id: {})", protocol, peer_id, request_id),
+        &format!(
+            "Sent {:?} request to {} (id: {})",
+            protocol, peer_id, request_id
+        ),
     );
 
     request_id
@@ -280,10 +293,16 @@ pub unsafe fn send_rpc_response_chunk(
         logger::log_info_module(
             network_id,
             "reqresp",
-            &format!("Sent response payload on channel {} (peer: {})", channel_id, channel.peer_id),
+            &format!(
+                "Sent response payload on channel {} (peer: {})",
+                channel_id, channel.peer_id
+            ),
         );
     } else {
-        logger::log_error(network_id, &format!("No response channel found for id {}", channel_id));
+        logger::log_error(
+            network_id,
+            &format!("No response channel found for id {}", channel_id),
+        );
     }
 }
 
@@ -312,10 +331,16 @@ pub unsafe fn send_rpc_end_of_stream(network_id: u32, channel_id: u64) {
         logger::log_info_module(
             network_id,
             "reqresp",
-            &format!("Sent end-of-stream on channel {} (peer: {})", channel_id, channel.peer_id),
+            &format!(
+                "Sent end-of-stream on channel {} (peer: {})",
+                channel_id, channel.peer_id
+            ),
         );
     } else {
-        logger::log_error(network_id, &format!("No response channel found for id {}", channel_id));
+        logger::log_error(
+            network_id,
+            &format!("No response channel found for id {}", channel_id),
+        );
     }
 }
 
@@ -330,7 +355,10 @@ pub unsafe fn send_rpc_error_response(
     if message_ptr.is_null() {
         logger::log_error(
             network_id,
-            &format!("Attempted to send RPC error response with null message pointer for channel {}", channel_id),
+            &format!(
+                "Attempted to send RPC error response with null message pointer for channel {}",
+                channel_id
+            ),
         );
         return;
     }
@@ -341,7 +369,10 @@ pub unsafe fn send_rpc_error_response(
     if message_bytes.len() > crate::req_resp::configurations::max_message_size() {
         logger::log_error(
             network_id,
-            &format!("Attempted to send RPC error payload exceeding maximum size on channel {}", channel_id),
+            &format!(
+                "Attempted to send RPC error payload exceeding maximum size on channel {}",
+                channel_id
+            ),
         );
         return;
     }
@@ -382,10 +413,16 @@ pub unsafe fn send_rpc_error_response(
         logger::log_info_module(
             network_id,
             "reqresp",
-            &format!("Sent error response on channel {} (peer: {}): {}", channel_id, peer_id, message),
+            &format!(
+                "Sent error response on channel {} (peer: {}): {}",
+                channel_id, peer_id, message
+            ),
         );
     } else {
-        logger::log_error(network_id, &format!("No response channel found for id {}", channel_id));
+        logger::log_error(
+            network_id,
+            &format!("No response channel found for id {}", channel_id),
+        );
     }
 }
 
@@ -486,9 +523,18 @@ impl Network {
                 // strip the p2p protocol if it exists
                 strip_peer_id(&mut multiaddr);
                 match swarm.dial(multiaddr.clone()) {
-                    Ok(()) => logger::log_debug(self.network_id, &format!("dialing libp2p peer address: {}", multiaddr)),
+                    Ok(()) => logger::log_debug(
+                        self.network_id,
+                        &format!("dialing libp2p peer address: {}", multiaddr),
+                    ),
                     Err(err) => {
-                        logger::log_error(self.network_id, &format!("could not connect to peer address: {} error: {:?}", multiaddr, err));
+                        logger::log_error(
+                            self.network_id,
+                            &format!(
+                                "could not connect to peer address: {} error: {:?}",
+                                multiaddr, err
+                            ),
+                        );
                     }
                 };
             };
@@ -898,7 +944,11 @@ impl Behaviour {
     }
 }
 
-fn new_swarm(local_keypair: Keypair, topics: Vec<String>, network_id: u32) -> libp2p::swarm::Swarm<Behaviour> {
+fn new_swarm(
+    local_keypair: Keypair,
+    topics: Vec<String>,
+    network_id: u32,
+) -> libp2p::swarm::Swarm<Behaviour> {
     let transport = build_transport(local_keypair.clone(), true).unwrap();
     logger::log_debug(network_id, "build the transport");
 

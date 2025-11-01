@@ -1,12 +1,12 @@
+use chrono::{Datelike, Local, Timelike};
 use std::fmt::Write;
 use std::io::{self, Write as IoWrite};
 use std::sync::Mutex;
-use chrono::{Local, Datelike, Timelike};
 
 const RESET: &str = "\x1b[0m";
-const ERR_COLOR: &str = "\x1b[31m";   // Red
-const WARN_COLOR: &str = "\x1b[33m";  // Yellow
-const INFO_COLOR: &str = "\x1b[32m";  // Green
+const ERR_COLOR: &str = "\x1b[31m"; // Red
+const WARN_COLOR: &str = "\x1b[33m"; // Yellow
+const INFO_COLOR: &str = "\x1b[32m"; // Green
 const DEBUG_COLOR: &str = "\x1b[36m"; // Cyan
 const TIMESTAMP_COLOR: &str = "\x1b[90m"; // Bright black
 const SCOPE_COLOR: &str = "\x1b[35m"; // Magenta
@@ -58,13 +58,12 @@ fn get_scope_prefix(network_id: u32) -> String {
 
 fn get_formatted_timestamp() -> String {
     const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
-    
+
     let now = Local::now();
     let month_str = MONTHS[(now.month0()) as usize];
-    
+
     format!(
         "{}-{:02} {:02}:{:02}:{:02}.{:03}",
         month_str,
@@ -76,19 +75,14 @@ fn get_formatted_timestamp() -> String {
     )
 }
 
-fn log_with_level(
-    level: LogLevel,
-    network_id: u32,
-    module: Option<&str>,
-    message: &str,
-) {
+fn log_with_level(level: LogLevel, network_id: u32, module: Option<&str>, message: &str) {
     let _lock = LOG_MUTEX.lock().unwrap();
-    
+
     let timestamp = get_formatted_timestamp();
     let scope_prefix = get_scope_prefix(network_id);
-    
+
     let mut output = String::new();
-    
+
     // Build the log message with colors
     write!(
         output,
@@ -104,22 +98,15 @@ fn log_with_level(
         RESET
     )
     .unwrap();
-    
+
     // Add module tag if provided
     if let Some(module) = module {
-        write!(
-            output,
-            "{}[{}]{} ",
-            MODULE_COLOR,
-            module,
-            RESET
-        )
-        .unwrap();
+        write!(output, "{}[{}]{} ", MODULE_COLOR, module, RESET).unwrap();
     }
-    
+
     // Add the actual message
     write!(output, "{}", message).unwrap();
-    
+
     // Write to stderr (matching Zig behavior)
     writeln!(io::stderr(), "{}", output).unwrap();
 }
@@ -155,4 +142,3 @@ pub fn log_warn_module(network_id: u32, module: &str, message: &str) {
 pub fn log_error_module(network_id: u32, module: &str, message: &str) {
     log_with_level(LogLevel::Error, network_id, Some(module), message);
 }
-
