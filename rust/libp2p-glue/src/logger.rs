@@ -61,7 +61,7 @@ fn get_formatted_timestamp() -> String {
     ];
 
     let now = Local::now();
-    let month_str = MONTHS[(now.month0()) as usize];
+    let month_str = MONTHS.get(now.month0() as usize).unwrap_or(&"???");
 
     format!(
         "{}-{:02} {:02}:{:02}:{:02}.{:03}",
@@ -75,7 +75,7 @@ fn get_formatted_timestamp() -> String {
 }
 
 fn log_with_level(level: LogLevel, network_id: u32, module: Option<&str>, message: &str) {
-    let _lock = LOG_MUTEX.lock().unwrap();
+    let _lock = LOG_MUTEX.lock().expect("LOG_MUTEX poisoned");
 
     let timestamp = get_formatted_timestamp();
     let scope_prefix = get_scope_prefix(network_id);
@@ -96,15 +96,16 @@ fn log_with_level(level: LogLevel, network_id: u32, module: Option<&str>, messag
         scope_prefix,
         RESET
     )
-    .unwrap();
+    .expect("Failed to format log header");
 
     // Add module tag if provided
     if let Some(module) = module {
-        write!(output, "{}[{}]{} ", MODULE_COLOR, module, RESET).unwrap();
+        write!(output, "{}[{}]{} ", MODULE_COLOR, module, RESET)
+            .expect("Failed to format module tag");
     }
 
     // Add the actual message
-    write!(output, "{}", message).unwrap();
+    write!(output, "{}", message).expect("Failed to format log message");
 
     // Write to stderr (matching Zig behavior)
     eprintln!("{}", output);
