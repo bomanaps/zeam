@@ -75,15 +75,13 @@ fn get_formatted_timestamp() -> String {
 }
 
 fn log_with_level(level: LogLevel, network_id: u32, module: Option<&str>, message: &str) {
-    let _lock = LOG_MUTEX.lock().expect("LOG_MUTEX poisoned");
-
     let timestamp = get_formatted_timestamp();
     let scope_prefix = get_scope_prefix(network_id);
 
     let mut output = String::new();
 
     // Build the log message with colors
-    write!(
+    if write!(
         output,
         "{}{}{} {}[{}{}]{}{} {} ",
         TIMESTAMP_COLOR,
@@ -96,19 +94,28 @@ fn log_with_level(level: LogLevel, network_id: u32, module: Option<&str>, messag
         scope_prefix,
         RESET
     )
-    .expect("Failed to format log header");
+    .is_err()
+    {
+        return;
+    }
 
     // Add module tag if provided
     if let Some(module) = module {
-        write!(output, "{}[{}]{} ", MODULE_COLOR, module, RESET)
-            .expect("Failed to format module tag");
+        if write!(output, "{}[{}]{} ", MODULE_COLOR, module, RESET).is_err() {
+            return;
+        }
     }
 
     // Add the actual message
-    write!(output, "{}", message).expect("Failed to format log message");
+    if write!(output, "{}", message).is_err() {
+        return;
+    }
 
-    // Write to stderr (matching Zig behavior)
-    eprintln!("{}", output);
+    // Write to stderr (matching Zig behavior) - lock only around the write
+    if let Ok(_lock) = LOG_MUTEX.lock() {
+        eprintln!("{}", output);
+    }
+    // If mutex is poisoned, silently skip this log entry
 }
 
 pub fn log_debug(network_id: u32, message: &str) {
