@@ -7,7 +7,7 @@ pub enum LogLevel {
     Error,
 }
 
-impl LogLevel { }
+impl LogLevel {}
 
 fn level_code(level: &LogLevel) -> u32 {
     match level {

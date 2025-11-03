@@ -509,19 +509,33 @@ extern "C" {
 }
 
 fn forward_log_with_handler(zig_handler: u64, level: u32, message: &str) {
-    unsafe { handleLogFromRustBridge(zig_handler, level, message.as_ptr(), message.len()); }
+    unsafe {
+        handleLogFromRustBridge(zig_handler, level, message.as_ptr(), message.len());
+    }
 }
 
 pub(crate) fn forward_log_by_network(network_id: u32, level: u32, message: &str) {
-    let handler_opt = unsafe { if network_id < 1 { ZIG_HANDLER0 } else { ZIG_HANDLER1 } };
+    let handler_opt = unsafe {
+        if network_id < 1 {
+            ZIG_HANDLER0
+        } else {
+            ZIG_HANDLER1
+        }
+    };
     if let Some(handler) = handler_opt {
         forward_log_with_handler(handler, level, message);
     }
 }
 
-fn rb_log_debug_net(network_id: u32, message: &str) { forward_log_by_network(network_id, 0, message); }
-fn rb_log_info_net(network_id: u32, message: &str) { forward_log_by_network(network_id, 1, message); }
-fn rb_log_error_net(network_id: u32, message: &str) { forward_log_by_network(network_id, 3, message); }
+fn rb_log_debug_net(network_id: u32, message: &str) {
+    forward_log_by_network(network_id, 0, message);
+}
+fn rb_log_info_net(network_id: u32, message: &str) {
+    forward_log_by_network(network_id, 1, message);
+}
+fn rb_log_error_net(network_id: u32, message: &str) {
+    forward_log_by_network(network_id, 3, message);
+}
 
 fn rb_log_info_module_net(network_id: u32, module: &str, message: &str) {
     let line = format!("[{}] {}", module, message);
