@@ -638,10 +638,9 @@ impl Network {
             }) => {
                 match timeout_result {
                     Ok((request_id, ())) => {
-                        logger::log_warn_module(
+                        logger::rustLogger.warn(
                             self.network_id,
-                            "reqresp",
-                            &format!("Request {} timed out after {:?}", request_id, REQUEST_TIMEOUT),
+                            &format!("[reqresp] Request {} timed out after {:?}", request_id, REQUEST_TIMEOUT),
                         );
                         if let Some(protocol_id) = REQUEST_PROTOCOL_MAP
                             .lock()
@@ -665,7 +664,7 @@ impl Network {
                         }
                     }
                     Err(e) => {
-                        logger::log_error_module(self.network_id, "reqresp", &format!("Error in delay map: {}", e));
+                        logger::rustLogger.error(self.network_id, &format!("[reqresp] Error in delay map: {}", e));
                     }
                 }
             }
