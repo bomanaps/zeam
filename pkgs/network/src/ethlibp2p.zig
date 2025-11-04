@@ -672,11 +672,11 @@ export fn handleLogFromRustBridge(
     const message_slice: []const u8 = message_ptr[0..message_len];
     const trimmed: []const u8 = std.mem.trim(u8, message_slice, " \t\r\n");
     switch (level) {
-        0 => zigHandler.logger.debug("{s}", .{trimmed}),
-        1 => zigHandler.logger.info("{s}", .{trimmed}),
-        2 => zigHandler.logger.warn("{s}", .{trimmed}),
-        3 => zigHandler.logger.err("{s}", .{trimmed}),
-        else => zigHandler.logger.debug("{s}", .{trimmed}),
+        0 => zigHandler.logger.debug("rust-bridge: {s}", .{trimmed}),
+        1 => zigHandler.logger.info("rust-bridge: {s}", .{trimmed}),
+        2 => zigHandler.logger.warn("rust-bridge: {s}", .{trimmed}),
+        3 => zigHandler.logger.err("rust-bridge: {s}", .{trimmed}),
+        else => zigHandler.logger.debug("rust-bridge:{s}", .{trimmed}),
     }
 }
 
