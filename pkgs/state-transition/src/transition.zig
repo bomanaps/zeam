@@ -7,6 +7,7 @@ const utils = types.utils;
 const params = @import("@zeam/params");
 const zeam_utils = @import("@zeam/utils");
 const xmss = @import("@zeam/xmss");
+const zeam_metrics = @import("@zeam/metrics");
 
 const Allocator = std.mem.Allocator;
 const debugLog = zeam_utils.zeamLog;
@@ -308,6 +309,9 @@ fn process_block(allocator: Allocator, state: *types.BeamState, block: types.Bea
 }
 
 pub fn apply_raw_block(allocator: Allocator, state: *types.BeamState, block: *types.BeamBlock, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {
+    const transition_timer = zeam_metrics.lean_state_transition_time_seconds.start();
+    defer _ = transition_timer.observe();
+
     // prepare pre state to process block for that slot, may be rename prepare_pre_state
     try process_slots(allocator, state, block.slot, logger, opts);
 
@@ -379,6 +383,9 @@ pub fn verifySingleAttestation(
 
 // TODO(gballet) check if beam block needs to be a pointer
 pub fn apply_transition(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, opts: StateTransitionOpts) !void {
+    const transition_timer = zeam_metrics.lean_state_transition_time_seconds.start();
+    defer _ = transition_timer.observe();
+
     opts.logger.debug("applying  state transition state-slot={d} block-slot={d}\n", .{ state.slot, block.slot });
 
     // client is supposed to call verify_signatures outside STF to make STF prover friendly

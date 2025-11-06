@@ -404,7 +404,7 @@ pub const BeamChain = struct {
         });
 
         // Get parent state to calculate slots processed
-        const parent_state = self.states.get(signedBlock.message.parent_root) orelse return BlockProcessingError.MissingPreState;
+        const parent_state = self.states.get(block.parent_root) orelse return BlockProcessingError.MissingPreState;
         const post_state = if (blockInfo.postState) |post_state_ptr| post_state_ptr else computedstate: {
             // 1. get parent state (already retrieved above)
             const cpost_state = try self.allocator.create(types.BeamState);
