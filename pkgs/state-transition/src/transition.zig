@@ -297,6 +297,7 @@ fn process_attestations(allocator: Allocator, state: *types.BeamState, attestati
 }
 
 fn process_block(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {
+    const block_duration_timer = zeam_metrics.block_processing_duration_seconds.start();
     const timer = zeam_metrics.lean_state_transition_block_processing_time_seconds.start();
 
     // start block processing
@@ -306,6 +307,7 @@ fn process_block(allocator: Allocator, state: *types.BeamState, block: types.Bea
     try process_operations(allocator, state, block, logger, opts);
 
     _ = timer.observe();
+    _ = block_duration_timer.observe();
 }
 
 pub fn apply_raw_block(allocator: Allocator, state: *types.BeamState, block: *types.BeamBlock, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {
