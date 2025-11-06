@@ -208,11 +208,9 @@ pub const BeamChain = struct {
         self.module_logger.debug("node-{d}::going for block production opts={any} raw block={s}", .{ self.nodeId, opts, block_str });
 
         // 2. apply STF to get post state & update post state root & cache it
-        const stf_timer = zeam_metrics.chain_onblock_duration_seconds.start();
         try stf.apply_raw_block(self.allocator, post_state, &block, self.block_building_logger, .{
             .logger = self.block_building_logger,
         });
-        _ = stf_timer.observe();
 
         // Update metrics after state transition
         const slots_processed = post_state.slot - parent_slot;
