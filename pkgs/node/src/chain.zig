@@ -208,7 +208,7 @@ pub const BeamChain = struct {
         self.module_logger.debug("node-{d}::going for block production opts={any} raw block={s}", .{ self.nodeId, opts, block_str });
 
         // 2. apply STF to get post state & update post state root & cache it
-        const stf_timer = api.chain_onblock_duration_seconds.start();
+        const stf_timer = zeam_metrics.chain_onblock_duration_seconds.start();
         try stf.apply_raw_block(self.allocator, post_state, &block, self.block_building_logger, .{
             .logger = self.block_building_logger,
         });
@@ -390,7 +390,7 @@ pub const BeamChain = struct {
     // this onBlock corresponds to spec's forkchoice's onblock with some functionality split between this and
     // our implemented forkchoice's onblock. this is to parallelize "apply transition" with other verifications
     pub fn onBlock(self: *Self, signedBlock: types.SignedBlockWithAttestation, blockInfo: CachedProcessedBlockInfo) !void {
-        const onblock_timer = api.chain_onblock_duration_seconds.start();
+        const onblock_timer = zeam_metrics.chain_onblock_duration_seconds.start();
 
         const block = signedBlock.message.block;
         const block_root: types.Root = blockInfo.blockRoot orelse computedroot: {

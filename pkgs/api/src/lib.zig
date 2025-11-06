@@ -7,14 +7,6 @@ pub const MetricsError = error{
     MetricsNotInitialized,
 };
 
-pub const metrics = zeam_metrics.metrics;
-pub const Timer = zeam_metrics.Timer;
-pub const Histogram = zeam_metrics.Histogram;
-pub const isZKVM = zeam_metrics.isZKVM;
-
-pub const chain_onblock_duration_seconds = &zeam_metrics.chain_onblock_duration_seconds;
-pub const block_processing_duration_seconds = &zeam_metrics.block_processing_duration_seconds;
-
 /// Initializes the metrics system. Must be called once at startup.
 pub fn init(allocator: std.mem.Allocator) !void {
     try zeam_metrics.init(allocator);
