@@ -433,7 +433,7 @@ pub fn build(b: *Builder) !void {
     cli_integration_tests.root_module.addImport("ssz", ssz);
     cli_integration_tests.root_module.addImport("@zeam/types", zeam_types);
     cli_integration_tests.root_module.addImport("@zeam/database", zeam_database);
-    addRustGlueLib(b, cli_integration_tests, target);
+    addRustGlueLib(b, cli_integration_tests, target, prover);
 
     // Add error handler module to integration tests
     const error_handler_module = b.addModule("error_handler", .{
