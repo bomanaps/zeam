@@ -427,23 +427,25 @@ pub const BeamNode = struct {
         var block_root: [32]u8 = undefined;
         try ssz.hashTreeRoot(types.BeamBlock, signed_block.message.block, &block_root, self.allocator);
 
-        // check if the block has not already been received through the network
+        const block_info: chainFactory.CachedProcessedBlockInfo = .{
+            .postState = self.chain.states.get(block_root),
+            .blockRoot = block_root,
+        };
+
         const hasBlock = self.chain.forkChoice.hasBlock(block_root);
         if (!hasBlock) {
-            self.logger.info("Seems like block was not locally produced, adding to the chain: slot={d} proposer={d}", .{
+            self.logger.info("Processing newly seen block through chain: slot={d} proposer={d}", .{
                 block.slot,
                 block.proposer_index,
             });
-            try self.chain.onBlock(signed_block, .{
-                .postState = self.chain.states.get(block_root),
-                .blockRoot = block_root,
-            });
         } else {
-            self.logger.debug("Skip adding produced block to chain as already present: slot={d} proposer={d}", .{
+            self.logger.debug("Processing locally produced block through chain pipeline: slot={d} proposer={d}", .{
                 block.slot,
                 block.proposer_index,
             });
         }
+
+        try self.chain.onBlock(signed_block, block_info);
     }
 
     pub fn publishAttestation(self: *Self, signed_attestation: types.SignedAttestation) !void {

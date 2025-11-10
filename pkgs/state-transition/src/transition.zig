@@ -144,6 +144,7 @@ fn process_execution_payload_header(state: *types.BeamState, block: types.BeamBl
     }
 }
 
+<<<<<<< HEAD
 fn process_operations(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {
     // 1. process attestations
     try process_attestations(allocator, state, block.body.attestations, logger, opts);
@@ -296,7 +297,10 @@ fn process_attestations(allocator: Allocator, state: *types.BeamState, attestati
     _ = timer.observe();
 }
 
+=======
+>>>>>>> 7f91c15 (Address review comment)
 fn process_block(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {
+    _ = opts;
     const block_duration_timer = zeam_metrics.block_processing_duration_seconds.start();
     const timer = zeam_metrics.lean_state_transition_block_processing_time_seconds.start();
 
@@ -304,15 +308,22 @@ fn process_block(allocator: Allocator, state: *types.BeamState, block: types.Bea
     try process_block_header(allocator, state, block, logger);
     // PQ devner-0 has no execution
     // try process_execution_payload_header(state, block);
-    try process_operations(allocator, state, block, logger, opts);
+    const attestations_timer = zeam_metrics.lean_state_transition_attestations_processing_time_seconds.start();
+    try state.process_attestations(allocator, block.body.attestations, logger);
+    _ = attestations_timer.observe();
 
     _ = timer.observe();
     _ = block_duration_timer.observe();
 }
 
+<<<<<<< HEAD
 pub fn apply_raw_block(allocator: Allocator, state: *types.BeamState, block: *types.BeamBlock, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {
     const transition_timer = zeam_metrics.lean_state_transition_time_seconds.start();
     defer _ = transition_timer.observe();
+=======
+pub fn apply_raw_block(allocator: Allocator, state: *types.BeamState, block: *types.BeamBlock, opts: StateTransitionOpts) !void {
+    const logger = opts.logger;
+>>>>>>> 7f91c15 (Address review comment)
 
     // prepare pre state to process block for that slot, may be rename prepare_pre_state
     try process_slots(allocator, state, block.slot, logger, opts);
