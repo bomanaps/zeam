@@ -3,8 +3,8 @@ const process = std.process;
 const net = std.net;
 const build_options = @import("build_options");
 const constants = @import("cli_constants");
-const error_handler = @import("error_handler");
-const ErrorHandler = error_handler.ErrorHandler;
+const cli = @import("@zeam/cli");
+const ErrorHandler = cli.error_handler.ErrorHandler;
 
 // Central integration tests file that imports all integration test modules.
 // This file serves as the entry point for the "simtest" build step.

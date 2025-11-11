@@ -15,3 +15,6 @@ pub const api_server = @import("api_server.zig");
 
 // Re-export constants module
 pub const constants = @import("constants.zig");
+
+// Re-export error handler module
+pub const error_handler = @import("error_handler.zig");

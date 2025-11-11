@@ -65,6 +65,9 @@ fn generateLeanQuickstartConfig(allocator: Allocator, config: TestConfig) !void 
     // CRITICAL: Must include metricsPort field for each validator!
     const validator_config_yaml =
         \\shuffle: roundrobin
+        \\config:
+        \\  activeEpoch: 18
+        \\  keyType: "hash-sig"
         \\validators:
         \\  - name: "zeam_0"
         \\    privkey: "a000000000000000000000000000000000000000000000000000000000000001"
@@ -205,12 +208,11 @@ const NodeProcess = struct {
 ///
 /// This function returns immediately with the script's process handle.
 /// The script will error at wait, but the node is already running.
-fn spawnNodeViaLeanQuickstart(
+fn spawnLeanQuickstartCluster(
     allocator: Allocator,
-    node_name: []const u8,
     network_dir: []const u8,
 ) !*NodeProcess {
-    std.debug.print("🚀 Spawning node via lean-quickstart: {s}\n", .{node_name});
+    std.debug.print("🚀 Spawning lean-quickstart spin-node.sh for zeam nodes\n", .{});
 
     // Get absolute path to lean-quickstart
     const cwd_path = try std.fs.cwd().realpathAlloc(allocator, ".");
@@ -224,17 +226,17 @@ fn spawnNodeViaLeanQuickstart(
     const relative_network_dir = try std.fmt.allocPrint(allocator, "../{s}", .{network_dir});
     defer allocator.free(relative_network_dir);
 
-    // Build command: NETWORK_DIR=... bash spin-node.sh --node <node_name> --validatorConfig genesis_bootnode
+    // Build command: NETWORK_DIR=... bash spin-node.sh --node zeam_0,zeam_1 --validatorConfig genesis_bootnode
     const args = &[_][]const u8{
         "/bin/bash",
         spin_script,
         "--node",
-        node_name,
+        "zeam_0,zeam_1",
         "--validatorConfig",
         "genesis_bootnode",
     };
 
-    std.debug.print("   Command: {s} {s} --node {s}\n", .{ args[0], args[1], node_name });
+    std.debug.print("   Command: {s} {s} --node zeam_0,zeam_1\n", .{ args[0], args[1] });
     std.debug.print("   NETWORK_DIR: {s} (relative to script)\n", .{relative_network_dir});
 
     const node_child = try allocator.create(process.Child);
@@ -271,7 +273,7 @@ fn spawnNodeViaLeanQuickstart(
         return err;
     };
 
-    std.debug.print("✅ Node process spawned: {s} (PID: {d})\n", .{ node_name, node_child.id });
+    std.debug.print("✅ spin-node.sh spawned (PID: {d})\n", .{node_child.id});
 
     const node_process = try allocator.create(NodeProcess);
     node_process.* = NodeProcess{
@@ -404,31 +406,23 @@ fn runTwoNodesViaLeanQuickstart(allocator: Allocator, config: TestConfig) !Final
     std.debug.print("▶️  STEP 1: Generating genesis via lean-quickstart\n", .{});
     try runGenesisGenerator(allocator, config.network_dir);
 
-    std.debug.print("\n▶️  STEP 2: Spawning Node 0 via spin-node.sh (port {d})\n", .{node_0_port});
-    const node_0_process = try spawnNodeViaLeanQuickstart(allocator, "zeam_0", config.network_dir);
+    std.debug.print("\n▶️  STEP 2: Spawning lean-quickstart spin-node.sh (--node zeam_0,zeam_1)\n", .{});
+    const cluster_process = try spawnLeanQuickstartCluster(allocator, config.network_dir);
     defer {
-        std.debug.print("\n🧹 Cleaning up node 0 process...\n", .{});
-        node_0_process.deinit();
-        allocator.destroy(node_0_process);
+        std.debug.print("\n🧹 Cleaning up lean-quickstart process...\n", .{});
+        cluster_process.deinit();
+        allocator.destroy(cluster_process);
     }
 
-    std.debug.print("\n▶️  STEP 3: Spawning Node 1 via spin-node.sh (port {d})\n", .{node_1_port});
-    const node_1_process = try spawnNodeViaLeanQuickstart(allocator, "zeam_1", config.network_dir);
-    defer {
-        std.debug.print("\n🧹 Cleaning up node 1 process...\n", .{});
-        node_1_process.deinit();
-        allocator.destroy(node_1_process);
-    }
+    std.debug.print("\n✅ spin-node.sh is running, waiting for nodes to come online\n", .{});
 
-    std.debug.print("\n✅ Both spin-node.sh processes spawned\n", .{});
-
-    std.debug.print("\n▶️  STEP 4: Waiting for nodes to start (60s timeout each)...\n", .{});
+    std.debug.print("\n▶️  STEP 3: Waiting for nodes to start (60s timeout each)...\n", .{});
     try waitForNodeStartup(node_0_port, 60);
     try waitForNodeStartup(node_1_port, 60);
 
     std.debug.print("\n✅ Both nodes are ready!\n", .{});
 
-    std.debug.print("\n▶️  STEP 5: Monitoring for finalization via SSE (timeout: {d}s)...\n", .{config.timeout_seconds});
+    std.debug.print("\n▶️  STEP 4: Monitoring for finalization via SSE (timeout: {d}s)...\n", .{config.timeout_seconds});
     const result = try monitorForFinalization(allocator, node_0_port, config.timeout_seconds);
 
     std.debug.print("\n", .{});
