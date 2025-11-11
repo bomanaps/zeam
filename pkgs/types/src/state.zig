@@ -265,7 +265,7 @@ pub const BeamState = struct {
         try self.process_attestations(allocator, staged_block.body.attestations, logger);
     }
 
-    pub fn process_attestations(self: *Self, allocator: Allocator, attestations: Attestations, logger: zeam_utils.ModuleLogger) !void {
+    fn process_attestations(self: *Self, allocator: Allocator, attestations: Attestations, logger: zeam_utils.ModuleLogger) !void {
         logger.debug("process attestations slot={d} \n prestate:historical hashes={d} justified slots ={d} attestations={d}, ", .{ self.slot, self.historical_block_hashes.len(), self.justified_slots.len(), attestations.constSlice().len });
         const justified_str = try self.latest_justified.toJsonString(allocator);
         defer allocator.free(justified_str);
