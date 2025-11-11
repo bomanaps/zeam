@@ -3,6 +3,7 @@ const ssz = @import("ssz");
 
 const params = @import("@zeam/params");
 const zeam_utils = @import("@zeam/utils");
+const zeam_metrics = @import("@zeam/metrics");
 
 const block = @import("./block.zig");
 const utils = @import("./utils.zig");
@@ -192,9 +193,18 @@ pub const BeamState = struct {
             return StateTransitionError.InvalidPreState;
         }
 
+        const start_slot = self.slot;
+        const slots_timer = zeam_metrics.lean_state_transition_slots_processing_time_seconds.start();
+        defer _ = slots_timer.observe();
+
         while (self.slot < slot) {
             try self.process_slot(allocator);
             self.slot += 1;
+        }
+
+        const slots_processed: u64 = @intCast(slot - start_slot);
+        if (slots_processed > 0) {
+            zeam_metrics.metrics.lean_state_transition_slots_processed_total.incrBy(slots_processed);
         }
     }
 
@@ -254,6 +264,11 @@ pub const BeamState = struct {
 
     pub fn process_block(self: *Self, allocator: Allocator, staged_block: BeamBlock, logger: zeam_utils.ModuleLogger) !void {
         // start block processing
+        const block_processing_timer = zeam_metrics.lean_state_transition_block_processing_time_seconds.start();
+        defer _ = block_processing_timer.observe();
+        const block_duration_timer = zeam_metrics.block_processing_duration_seconds.start();
+        defer _ = block_duration_timer.observe();
+
         try self.process_block_header(allocator, staged_block, logger);
         // PQ devner-0 has no execution
         // try process_execution_payload_header(state, block);
@@ -266,6 +281,13 @@ pub const BeamState = struct {
     }
 
     fn process_attestations(self: *Self, allocator: Allocator, attestations: Attestations, logger: zeam_utils.ModuleLogger) !void {
+        const attestations_timer = zeam_metrics.lean_state_transition_attestations_processing_time_seconds.start();
+        defer _ = attestations_timer.observe();
+        const attestation_count: u64 = @intCast(attestations.constSlice().len);
+        if (attestation_count > 0) {
+            zeam_metrics.metrics.lean_state_transition_attestations_processed_total.incrBy(attestation_count);
+        }
+
         logger.debug("process attestations slot={d} \n prestate:historical hashes={d} justified slots ={d} attestations={d}, ", .{ self.slot, self.historical_block_hashes.len(), self.justified_slots.len(), attestations.constSlice().len });
         const justified_str = try self.latest_justified.toJsonString(allocator);
         defer allocator.free(justified_str);

@@ -517,6 +517,10 @@ pub const BeamChain = struct {
             blockInfo.blockRoot == null,
             blockInfo.postState == null,
         });
+
+        // Emit gauge metrics once the block has been fully processed and persisted
+        zeam_metrics.metrics.lean_latest_justified_slot.set(latest_justified.slot);
+        zeam_metrics.metrics.lean_latest_finalized_slot.set(latest_finalized.slot);
     }
 
     /// Validate incoming attestation before processing.

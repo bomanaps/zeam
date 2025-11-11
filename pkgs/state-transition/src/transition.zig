@@ -51,14 +51,10 @@ fn process_slots(allocator: Allocator, state: *types.BeamState, slot: types.Slot
         return StateTransitionError.InvalidPreState;
     }
 
-    const timer = zeam_metrics.lean_state_transition_slots_processing_time_seconds.start();
-
     while (state.slot < slot) {
         try process_slot(allocator, state);
         state.slot += 1;
     }
-
-    _ = timer.observe();
 }
 
 pub fn is_justifiable_slot(finalized: types.Slot, candidate: types.Slot) !bool {
@@ -296,12 +292,8 @@ fn process_attestations(allocator: Allocator, state: *types.BeamState, attestati
     _ = timer.observe();
 }
 fn process_block(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {
-=======
 fn process_attestations(allocator: Allocator, state: *types.BeamState, attestations: types.Attestations, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {
->>>>>>> 69c657c (Revert "Address review comment")
     _ = opts;
-    const timer = zeam_metrics.lean_state_transition_attestations_processing_time_seconds.start();
-
     logger.debug("process attestations slot={d} \n prestate:historical hashes={d} justified slots ={d} votes={d}, ", .{ state.slot, state.historical_block_hashes.len(), state.justified_slots.len(), attestations.constSlice().len });
     const justified_str = try state.latest_justified.toJsonString(allocator);
     defer allocator.free(justified_str);
@@ -441,32 +433,26 @@ fn process_attestations(allocator: Allocator, state: *types.BeamState, attestati
     defer allocator.free(finalized_str_final);
 
     logger.debug("poststate: justified={s} finalized={s}", .{ justified_str_final, finalized_str_final });
-
-    _ = timer.observe();
 }
 
 fn process_block(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {
-    const block_duration_timer = zeam_metrics.block_processing_duration_seconds.start();
-    const timer = zeam_metrics.lean_state_transition_block_processing_time_seconds.start();
-
     // start block processing
     try process_block_header(allocator, state, block, logger);
     // PQ devner-0 has no execution
     // try process_execution_payload_header(state, block);
     try process_operations(allocator, state, block, logger, opts);
-
-    _ = timer.observe();
-    _ = block_duration_timer.observe();
 }
 
 pub fn apply_raw_block(allocator: Allocator, state: *types.BeamState, block: *types.BeamBlock, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {
+    _ = opts;
     const transition_timer = zeam_metrics.lean_state_transition_time_seconds.start();
     defer _ = transition_timer.observe();
-    // prepare pre state to process block for that slot, may be rename prepare_pre_state
-    try process_slots(allocator, state, block.slot, logger, opts);
+
+    // prepare pre state to process block for that slot
+    try state.process_slots(allocator, block.slot, logger);
 
     // process block and modify the pre state to post state
-    try process_block(allocator, state, block.*, logger, opts);
+    try state.process_block(allocator, block.*, logger);
 
     logger.debug("extracting state root\n", .{});
     // extract the post state root
@@ -545,9 +531,9 @@ pub fn apply_transition(allocator: Allocator, state: *types.BeamState, block: ty
     }
 
     // prepare the pre state for this block slot
-    try process_slots(allocator, state, block.slot, opts.logger, opts);
+    try state.process_slots(allocator, block.slot, opts.logger);
     // process the block
-    try process_block(allocator, state, block, opts.logger, opts);
+    try state.process_block(allocator, block, opts.logger);
 
     const validateResult = opts.validateResult;
     if (validateResult) {
