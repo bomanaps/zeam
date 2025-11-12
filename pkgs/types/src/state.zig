@@ -204,7 +204,9 @@ pub const BeamState = struct {
 
         const slots_processed: u64 = @intCast(slot - start_slot);
         if (slots_processed > 0) {
-            zeam_metrics.metrics.lean_state_transition_slots_processed_total.incrBy(slots_processed);
+            if (comptime !zeam_metrics.isZKVM()) {
+                zeam_metrics.metrics.lean_state_transition_slots_processed_total.incrBy(slots_processed);
+            }
         }
     }
 
@@ -285,7 +287,9 @@ pub const BeamState = struct {
         defer _ = attestations_timer.observe();
         const attestation_count: u64 = @intCast(attestations.constSlice().len);
         if (attestation_count > 0) {
-            zeam_metrics.metrics.lean_state_transition_attestations_processed_total.incrBy(attestation_count);
+            if (comptime !zeam_metrics.isZKVM()) {
+                zeam_metrics.metrics.lean_state_transition_attestations_processed_total.incrBy(attestation_count);
+            }
         }
 
         logger.debug("process attestations slot={d} \n prestate:historical hashes={d} justified slots ={d} attestations={d}, ", .{ self.slot, self.historical_block_hashes.len(), self.justified_slots.len(), attestations.constSlice().len });

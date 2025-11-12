@@ -149,6 +149,14 @@ pub fn build(b: *Builder) !void {
         .root_source_file = b.path("pkgs/params/src/lib.zig"),
     });
 
+    // add zeam-metrics (core metrics definitions)
+    const zeam_metrics = b.addModule("@zeam/metrics", .{
+        .root_source_file = b.path("pkgs/metrics/src/lib.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    zeam_metrics.addImport("metrics", metrics);
+
     // add zeam-types
     const zeam_types = b.addModule("@zeam/types", .{
         .root_source_file = b.path("pkgs/types/src/lib.zig"),
@@ -158,6 +166,7 @@ pub fn build(b: *Builder) !void {
     zeam_types.addImport("ssz", ssz);
     zeam_types.addImport("@zeam/params", zeam_params);
     zeam_types.addImport("@zeam/utils", zeam_utils);
+    zeam_types.addImport("@zeam/metrics", zeam_metrics);
 
     // add zeam-types
     const zeam_configs = b.addModule("@zeam/configs", .{
@@ -169,14 +178,6 @@ pub fn build(b: *Builder) !void {
     zeam_configs.addImport("@zeam/types", zeam_types);
     zeam_configs.addImport("@zeam/params", zeam_params);
     zeam_configs.addImport("yaml", yaml);
-
-    // add zeam-metrics (core metrics definitions)
-    const zeam_metrics = b.addModule("@zeam/metrics", .{
-        .root_source_file = b.path("pkgs/metrics/src/lib.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    zeam_metrics.addImport("metrics", metrics);
 
     // add zeam-api (HTTP serving and events)
     const zeam_api = b.addModule("@zeam/api", .{
@@ -620,6 +621,14 @@ fn build_zkvm_targets(b: *Builder, main_exe: *Builder.Step, host_target: std.Bui
             .root_source_file = b.path("pkgs/utils/src/lib.zig"),
         });
 
+        // add zeam-metrics (core metrics definitions for ZKVM)
+        const zeam_metrics = b.addModule("@zeam/metrics", .{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("pkgs/metrics/src/lib.zig"),
+        });
+        zeam_metrics.addImport("metrics", metrics);
+
         // add zeam-types
         const zeam_types = b.addModule("@zeam/types", .{
             .target = target,
@@ -629,14 +638,7 @@ fn build_zkvm_targets(b: *Builder, main_exe: *Builder.Step, host_target: std.Bui
         zeam_types.addImport("ssz", ssz);
         zeam_types.addImport("@zeam/params", zeam_params);
         zeam_types.addImport("@zeam/utils", zeam_utils);
-
-        // add zeam-metrics (core metrics definitions for ZKVM)
-        const zeam_metrics = b.addModule("@zeam/metrics", .{
-            .target = target,
-            .optimize = optimize,
-            .root_source_file = b.path("pkgs/metrics/src/lib.zig"),
-        });
-        zeam_metrics.addImport("metrics", metrics);
+        zeam_types.addImport("@zeam/metrics", zeam_metrics);
 
         const zkvm_module = b.addModule("zkvm", .{
             .optimize = optimize,
