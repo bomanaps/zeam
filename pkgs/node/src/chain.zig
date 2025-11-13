@@ -401,7 +401,7 @@ pub const BeamChain = struct {
 
             // 2. verify XMSS signatures (independent step; placed before STF for now, parallelizable later)
             var validSignatures = true;
-            stf.verify_signatures(signedBlock) catch {
+            stf.verifySignatures(self.allocator, parent_state, &signedBlock) catch {
                 validSignatures = false;
             };
             try stf.apply_transition(self.allocator, cpost_state, block, .{
@@ -411,8 +411,6 @@ pub const BeamChain = struct {
             });
             break :computedstate cpost_state;
         };
-        const slots_processed: u64 = post_state.slot - parent_state.slot;
-        const attestations_count: u64 = @intCast(block.body.attestations.constSlice().len);
         // 3. fc onblock
         const fcBlock = try self.forkChoice.onBlock(block, post_state, .{
             .currentSlot = block.slot,
@@ -518,7 +516,6 @@ pub const BeamChain = struct {
             blockInfo.postState == null,
         });
 
-        // Emit gauge metrics once the block has been fully processed and persisted
         zeam_metrics.metrics.lean_latest_justified_slot.set(latest_justified.slot);
         zeam_metrics.metrics.lean_latest_finalized_slot.set(latest_finalized.slot);
     }

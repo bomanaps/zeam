@@ -1,12 +1,16 @@
 const ssz = @import("ssz");
 const std = @import("std");
+const json = std.json;
 const types = @import("@zeam/types");
+const utils = types.utils;
 
+const params = @import("@zeam/params");
 const zeam_utils = @import("@zeam/utils");
 const xmss = @import("@zeam/xmss");
 const zeam_metrics = @import("@zeam/metrics");
 
 const Allocator = std.mem.Allocator;
+const debugLog = zeam_utils.zeamLog;
 const StateTransitionError = types.StateTransitionError;
 
 // put the active logs at debug level for now by default
@@ -46,8 +50,13 @@ pub fn is_justifiable_slot(finalized: types.Slot, candidate: types.Slot) !bool {
     return false;
 }
 
-pub fn apply_raw_block(allocator: Allocator, state: *types.BeamState, block: *types.BeamBlock, logger: zeam_utils.ModuleLogger, opts: StateTransitionOpts) !void {
-    _ = opts;
+pub fn apply_raw_block(
+    allocator: Allocator,
+    state: *types.BeamState,
+    block: *types.BeamBlock,
+    opts: StateTransitionOpts,
+) !void {
+    const logger = opts.logger;
     const transition_timer = zeam_metrics.lean_state_transition_time_seconds.start();
     defer _ = transition_timer.observe();
 
@@ -60,6 +69,7 @@ pub fn apply_raw_block(allocator: Allocator, state: *types.BeamState, block: *ty
     block.state_root = state_root;
 }
 
+// fill this up when we have signature scheme
 pub fn verifySignatures(
     allocator: Allocator,
     state: *const types.BeamState,
@@ -92,6 +102,8 @@ pub fn verifySignatures(
     );
 }
 
+pub const verify_signatures = verifySignatures;
+
 pub fn verifySingleAttestation(
     allocator: Allocator,
     state: *const types.BeamState,
@@ -111,16 +123,25 @@ pub fn verifySingleAttestation(
     try ssz.hashTreeRoot(types.Attestation, attestation.*, &message, allocator);
 
     const epoch: u32 = @intCast(attestation.data.slot);
-
     try xmss.verifyBincode(pubkey, &message, epoch, signatureBytes);
 }
 
-pub fn apply_transition(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, opts: StateTransitionOpts) !void {
+// TODO(gballet) check if beam block needs to be a pointer
+pub fn apply_transition(
+    allocator: Allocator,
+    state: *types.BeamState,
+    block: types.BeamBlock,
+    opts: StateTransitionOpts,
+) !void {
     const transition_timer = zeam_metrics.lean_state_transition_time_seconds.start();
     defer _ = transition_timer.observe();
 
-    opts.logger.debug("applying  state transition state-slot={d} block-slot={d}\n", .{ state.slot, block.slot });
+    opts.logger.debug(
+        "applying  state transition state-slot={d} block-slot={d}\n",
+        .{ state.slot, block.slot },
+    );
 
+    // client is supposed to call verify_signatures outside STF to make STF prover friendly
     const validSignatures = opts.validSignatures;
     if (!validSignatures) {
         return StateTransitionError.InvalidBlockSignatures;
@@ -133,7 +154,10 @@ pub fn apply_transition(allocator: Allocator, state: *types.BeamState, block: ty
         var state_root: [32]u8 = undefined;
         try ssz.hashTreeRoot(*types.BeamState, state, &state_root, allocator);
         if (!std.mem.eql(u8, &state_root, &block.state_root)) {
-            opts.logger.debug("state root={x:02} block root={x:02}\n", .{ state_root, block.state_root });
+            opts.logger.debug(
+                "state root={x:02} block root={x:02}\n",
+                .{ state_root, block.state_root },
+            );
             return StateTransitionError.InvalidPostState;
         }
     }
