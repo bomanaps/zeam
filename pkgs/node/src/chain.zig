@@ -392,22 +392,17 @@ pub const BeamChain = struct {
             block.slot,
         });
 
-        // Get parent state to calculate slots processed
-        const parent_state = self.states.get(block.parent_root) orelse return BlockProcessingError.MissingPreState;
         const post_state = if (blockInfo.postState) |post_state_ptr| post_state_ptr else computedstate: {
-            // 1. get parent state (already retrieved above)
+            const pre_state = self.states.get(block.parent_root) orelse return BlockProcessingError.MissingPreState;
             const cpost_state = try self.allocator.create(types.BeamState);
-            try types.sszClone(self.allocator, types.BeamState, parent_state.*, cpost_state);
+            try types.sszClone(self.allocator, types.BeamState, pre_state.*, cpost_state);
 
             // 2. verify XMSS signatures (independent step; placed before STF for now, parallelizable later)
-            var validSignatures = true;
-            stf.verifySignatures(self.allocator, parent_state, &signedBlock) catch {
-                validSignatures = false;
-            };
+            try stf.verifySignatures(self.allocator, pre_state, &signedBlock);
             try stf.apply_transition(self.allocator, cpost_state, block, .{
                 //
                 .logger = self.stf_logger,
-                .validSignatures = validSignatures,
+                .validSignatures = true,
             });
             break :computedstate cpost_state;
         };

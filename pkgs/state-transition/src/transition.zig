@@ -29,27 +29,6 @@ pub const StateTransitionOpts = struct {
 //     return;
 // }
 
-pub fn is_justifiable_slot(finalized: types.Slot, candidate: types.Slot) !bool {
-    if (candidate < finalized) {
-        return StateTransitionError.InvalidJustifiableSlot;
-    }
-
-    const delta: f32 = @floatFromInt(candidate - finalized);
-    if (delta <= 5) {
-        return true;
-    }
-    const delta_x2: f32 = @mod(std.math.pow(f32, delta, 0.5), 1);
-    if (delta_x2 == 0) {
-        return true;
-    }
-    const delta_x2_x: f32 = @mod(std.math.pow(f32, delta + 0.25, 0.5), 1);
-    if (delta_x2_x == 0.5) {
-        return true;
-    }
-
-    return false;
-}
-
 pub fn apply_raw_block(
     allocator: Allocator,
     state: *types.BeamState,
@@ -60,7 +39,6 @@ pub fn apply_raw_block(
     const transition_timer = zeam_metrics.lean_state_transition_time_seconds.start();
     defer _ = transition_timer.observe();
 
-    try state.process_slots(allocator, block.slot, logger);
     try state.process_block(allocator, block.*, logger);
 
     logger.debug("extracting state root\n", .{});
@@ -147,7 +125,6 @@ pub fn apply_transition(
         return StateTransitionError.InvalidBlockSignatures;
     }
 
-    try state.process_slots(allocator, block.slot, opts.logger);
     try state.process_block(allocator, block, opts.logger);
 
     if (opts.validateResult) {

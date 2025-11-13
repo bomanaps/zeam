@@ -265,11 +265,12 @@ pub const BeamState = struct {
     }
 
     pub fn process_block(self: *Self, allocator: Allocator, staged_block: BeamBlock, logger: zeam_utils.ModuleLogger) !void {
-        // start block processing
-        const block_processing_timer = zeam_metrics.lean_state_transition_block_processing_time_seconds.start();
-        defer _ = block_processing_timer.observe();
-        const block_duration_timer = zeam_metrics.block_processing_duration_seconds.start();
-        defer _ = block_duration_timer.observe();
+        if (self.slot < staged_block.slot) {
+            try self.process_slots(allocator, staged_block.slot, logger);
+        } else if (self.slot != staged_block.slot) {
+            logger.err("process-block: invalid pre-state slot={d} > block-slot={d}", .{ self.slot, staged_block.slot });
+            return StateTransitionError.InvalidPreState;
+        }
 
         try self.process_block_header(allocator, staged_block, logger);
         // PQ devner-0 has no execution
