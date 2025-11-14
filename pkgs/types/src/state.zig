@@ -208,9 +208,8 @@ pub const BeamState = struct {
             self.slot += 1;
         }
 
-        const slots_processed: u64 = @intCast(slot - start_slot);
-
         if (comptime !zeam_metrics.isZKVM()) {
+            const slots_processed: u64 = @intCast(slot - start_slot);
             zeam_metrics.metrics.lean_state_transition_slots_processed_total.incrBy(slots_processed);
         }
     }
@@ -285,9 +284,9 @@ pub const BeamState = struct {
     fn process_attestations(self: *Self, allocator: Allocator, attestations: Attestations, logger: zeam_utils.ModuleLogger) !void {
         const attestations_timer = zeam_metrics.lean_state_transition_attestations_processing_time_seconds.start();
         defer _ = attestations_timer.observe();
-        const attestation_count: u64 = @intCast(attestations.constSlice().len);
 
         if (comptime !zeam_metrics.isZKVM()) {
+            const attestation_count: u64 = @intCast(attestations.constSlice().len);
             zeam_metrics.metrics.lean_state_transition_attestations_processed_total.incrBy(attestation_count);
         }
 
