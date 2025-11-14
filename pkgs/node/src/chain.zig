@@ -18,6 +18,7 @@ const zeam_utils = @import("@zeam/utils");
 const keymanager = @import("@zeam/key-manager");
 const jsonToString = zeam_utils.jsonToString;
 
+const utils = @import("./utils.zig");
 pub const fcFactory = @import("./forkchoice.zig");
 const constants = @import("./constants.zig");
 
@@ -342,10 +343,11 @@ pub const BeamChain = struct {
                     const hasParentBlock = self.forkChoice.hasBlock(block.parent_root);
                     self.module_logger.debug("block processing is required hasParentBlock={any}", .{hasParentBlock});
                     if (hasParentBlock) {
-                        self.onBlock(signed_block, .{}) catch |err| {
-                            self.module_logger.err(" ^^^^^^^^ Block processing error ^^^^^^ {any}", .{err});
-                            return err;
+                        const missing_roots = self.onBlock(signed_block, .{}) catch |err| {
+                            self.module_logger.debug(" ^^^^^^^^ Block processing error ^^^^^^ {any}", .{err});
+                            return;
                         };
+                        defer self.allocator.free(missing_roots);
                     }
                 }
             },
@@ -376,8 +378,9 @@ pub const BeamChain = struct {
     // import block assuming it is gossip validated or synced
     // this onBlock corresponds to spec's forkchoice's onblock with some functionality split between this and
     // our implemented forkchoice's onblock. this is to parallelize "apply transition" with other verifications
-    pub fn onBlock(self: *Self, signedBlock: types.SignedBlockWithAttestation, blockInfo: CachedProcessedBlockInfo) !void {
-        const onblock_timer = zeam_metrics.chain_onblock_duration_seconds.start();
+    // Returns a list of missing block roots that need to be fetched from the network
+    pub fn onBlock(self: *Self, signedBlock: types.SignedBlockWithAttestation, blockInfo: CachedProcessedBlockInfo) ![]types.Root {
+        const onblock_timer = api.chain_onblock_duration_seconds.start();
 
         const block = signedBlock.message.block;
         const block_root: types.Root = blockInfo.blockRoot orelse computedroot: {
@@ -421,10 +424,18 @@ pub const BeamChain = struct {
             block.slot,
         });
 
+        var missing_roots = std.ArrayList(types.Root).init(self.allocator);
+        errdefer missing_roots.deinit();
+
         const signatures = signedBlock.signature.constSlice();
+
         for (block.body.attestations.constSlice(), 0..) |attestation, index| {
             // Validate attestation before processing (from block = true)
             self.validateAttestation(attestation, true) catch |e| {
+                if (e == AttestationValidationError.UnknownHeadBlock) {
+                    try missing_roots.append(attestation.data.head.root);
+                }
+
                 self.module_logger.err("invalid attestation in block: validator={d} error={any}", .{ attestation.validator_id, e });
                 // Skip invalid attestations but continue processing the block
                 continue;
@@ -514,6 +525,8 @@ pub const BeamChain = struct {
 
         zeam_metrics.metrics.lean_latest_justified_slot.set(latest_justified.slot);
         zeam_metrics.metrics.lean_latest_finalized_slot.set(latest_finalized.slot);
+
+        return missing_roots.toOwnedSlice();
     }
 
     /// Validate incoming attestation before processing.
@@ -708,7 +721,8 @@ test "process and add mock blocks into a node's chain" {
         const current_slot = block.slot;
 
         try beam_chain.forkChoice.onInterval(current_slot * constants.INTERVALS_PER_SLOT, false);
-        try beam_chain.onBlock(signed_block, .{});
+        const missing_roots = try beam_chain.onBlock(signed_block, .{});
+        allocator.free(missing_roots);
 
         try std.testing.expect(beam_chain.forkChoice.protoArray.nodes.items.len == i + 1);
         try std.testing.expect(std.mem.eql(u8, &mock_chain.blockRoots[i], &beam_chain.forkChoice.protoArray.nodes.items[i].blockRoot));
@@ -776,7 +790,8 @@ test "printSlot output demonstration" {
         const current_slot = block.slot;
 
         try beam_chain.forkChoice.onInterval(current_slot * constants.INTERVALS_PER_SLOT, false);
-        try beam_chain.onBlock(signed_block, .{});
+        const missing_roots = try beam_chain.onBlock(signed_block, .{});
+        allocator.free(missing_roots);
     }
 
     // Register some validators to make the output more interesting
@@ -845,7 +860,8 @@ test "attestation validation - comprehensive" {
         const signed_block = mock_chain.blocks[i];
         const block = signed_block.message.block;
         try beam_chain.forkChoice.onInterval(block.slot * constants.INTERVALS_PER_SLOT, false);
-        try beam_chain.onBlock(signed_block, .{});
+        const missing_roots = try beam_chain.onBlock(signed_block, .{});
+        allocator.free(missing_roots);
     }
 
     // Test 1: Valid attestation (baseline - should pass)
@@ -1128,7 +1144,8 @@ test "attestation validation - gossip vs block future slot handling" {
     // Add one block (slot 1)
     const block = mock_chain.blocks[1];
     try beam_chain.forkChoice.onInterval(block.message.block.slot * constants.INTERVALS_PER_SLOT, false);
-    try beam_chain.onBlock(block, .{});
+    const missing_roots = try beam_chain.onBlock(block, .{});
+    allocator.free(missing_roots);
 
     // Current time is at slot 1, create attestation for slot 2 (next slot)
     const next_slot_attestation: types.SignedAttestation = .{
@@ -1224,7 +1241,8 @@ test "attestation processing - valid block attestation" {
     for (1..mock_chain.blocks.len) |i| {
         const block = mock_chain.blocks[i];
         try beam_chain.forkChoice.onInterval(block.message.block.slot * constants.INTERVALS_PER_SLOT, false);
-        try beam_chain.onBlock(block, .{});
+        const missing_roots = try beam_chain.onBlock(block, .{});
+        allocator.free(missing_roots);
     }
 
     // Create a valid attestation
