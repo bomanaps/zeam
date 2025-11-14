@@ -44,6 +44,7 @@ pub fn apply_raw_block(allocator: Allocator, state: *types.BeamState, block: *ty
 
     // prepare pre state to process block for that slot, may be rename prepare_pre_state
     try state.process_slots(allocator, block.slot, logger);
+
     // process block and modify the pre state to post state
     try state.process_block(allocator, block.*, logger);
 
@@ -106,23 +107,16 @@ pub fn verifySingleAttestation(
     try ssz.hashTreeRoot(types.Attestation, attestation.*, &message, allocator);
 
     const epoch: u32 = @intCast(attestation.data.slot);
+
     try xmss.verifyBincode(pubkey, &message, epoch, signatureBytes);
 }
 
 // TODO(gballet) check if beam block needs to be a pointer
-pub fn apply_transition(
-    allocator: Allocator,
-    state: *types.BeamState,
-    block: types.BeamBlock,
-    opts: StateTransitionOpts,
-) !void {
+pub fn apply_transition(allocator: Allocator, state: *types.BeamState, block: types.BeamBlock, opts: StateTransitionOpts) !void {
+    opts.logger.debug("applying  state transition state-slot={d} block-slot={d}\n", .{ state.slot, block.slot });
+
     const transition_timer = zeam_metrics.lean_state_transition_time_seconds.start();
     defer _ = transition_timer.observe();
-
-    opts.logger.debug(
-        "applying  state transition state-slot={d} block-slot={d}\n",
-        .{ state.slot, block.slot },
-    );
 
     // client is supposed to call verify_signatures outside STF to make STF prover friendly
     const validSignatures = opts.validSignatures;
@@ -130,16 +124,19 @@ pub fn apply_transition(
         return StateTransitionError.InvalidBlockSignatures;
     }
 
+    // prepare the pre state for this block slot
+    try state.process_slots(allocator, block.slot, opts.logger);
+
+    // process the block
     try state.process_block(allocator, block, opts.logger);
 
-    if (opts.validateResult) {
+    const validateResult = opts.validateResult;
+    if (validateResult) {
+        // verify the post state root
         var state_root: [32]u8 = undefined;
         try ssz.hashTreeRoot(*types.BeamState, state, &state_root, allocator);
         if (!std.mem.eql(u8, &state_root, &block.state_root)) {
-            opts.logger.debug(
-                "state root={x:02} block root={x:02}\n",
-                .{ state_root, block.state_root },
-            );
+            opts.logger.debug("state root={x:02} block root={x:02}\n", .{ state_root, block.state_root });
             return StateTransitionError.InvalidPostState;
         }
     }
