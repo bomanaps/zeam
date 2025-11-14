@@ -207,9 +207,7 @@ pub const BeamChain = struct {
         self.module_logger.debug("node-{d}::going for block production opts={any} raw block={s}", .{ self.nodeId, opts, block_str });
 
         // 2. apply STF to get post state & update post state root & cache it
-        try stf.apply_raw_block(self.allocator, post_state, &block, .{
-            .logger = self.block_building_logger,
-        });
+        try stf.apply_raw_block(self.allocator, post_state, &block, self.block_building_logger);
 
         block_json = try block.toJson(self.allocator);
         const block_str_2 = try jsonToString(self.allocator, block_json);
@@ -393,12 +391,15 @@ pub const BeamChain = struct {
         });
 
         const post_state = if (blockInfo.postState) |post_state_ptr| post_state_ptr else computedstate: {
+            // 1. get parent state
             const pre_state = self.states.get(block.parent_root) orelse return BlockProcessingError.MissingPreState;
             const cpost_state = try self.allocator.create(types.BeamState);
             try types.sszClone(self.allocator, types.BeamState, pre_state.*, cpost_state);
 
             // 2. verify XMSS signatures (independent step; placed before STF for now, parallelizable later)
             try stf.verifySignatures(self.allocator, pre_state, &signedBlock);
+
+            // 3. apply state transition assuming signatures are valid (STF does not re-verify)
             try stf.apply_transition(self.allocator, cpost_state, block, .{
                 //
                 .logger = self.stf_logger,

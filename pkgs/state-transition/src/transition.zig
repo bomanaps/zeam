@@ -29,19 +29,26 @@ pub const StateTransitionOpts = struct {
 //     return;
 // }
 
-pub fn apply_raw_block(
-    allocator: Allocator,
-    state: *types.BeamState,
-    block: *types.BeamBlock,
-    opts: StateTransitionOpts,
-) !void {
-    const logger = opts.logger;
+// not active in PQ devnet0 - zig will automatically prune this from code
+fn process_execution_payload_header(state: *types.BeamState, block: types.BeamBlock) !void {
+    const expected_timestamp = state.genesis_time + block.slot * params.SECONDS_PER_SLOT;
+    if (expected_timestamp != block.body.execution_payload_header.timestamp) {
+        return StateTransitionError.InvalidExecutionPayloadHeaderTimestamp;
+    }
+}
+
+pub fn apply_raw_block(allocator: Allocator, state: *types.BeamState, block: *types.BeamBlock, logger: zeam_utils.ModuleLogger) !void {
+    // prepare pre state to process block for that slot, may be rename prepare_pre_stateCollapse comment
     const transition_timer = zeam_metrics.lean_state_transition_time_seconds.start();
     defer _ = transition_timer.observe();
 
+    // prepare pre state to process block for that slot, may be rename prepare_pre_state
+    try state.process_slots(allocator, block.slot, logger);
+    // process block and modify the pre state to post state
     try state.process_block(allocator, block.*, logger);
 
     logger.debug("extracting state root\n", .{});
+    // extract the post state root
     var state_root: [32]u8 = undefined;
     try ssz.hashTreeRoot(*types.BeamState, state, &state_root, allocator);
     block.state_root = state_root;
@@ -79,8 +86,6 @@ pub fn verifySignatures(
         &signatures[signatures.len - 1],
     );
 }
-
-pub const verify_signatures = verifySignatures;
 
 pub fn verifySingleAttestation(
     allocator: Allocator,

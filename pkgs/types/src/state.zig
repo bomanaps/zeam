@@ -203,10 +203,9 @@ pub const BeamState = struct {
         }
 
         const slots_processed: u64 = @intCast(slot - start_slot);
-        if (slots_processed > 0) {
-            if (comptime !zeam_metrics.isZKVM()) {
-                zeam_metrics.metrics.lean_state_transition_slots_processed_total.incrBy(slots_processed);
-            }
+
+        if (comptime !zeam_metrics.isZKVM()) {
+            zeam_metrics.metrics.lean_state_transition_slots_processed_total.incrBy(slots_processed);
         }
     }
 
@@ -265,13 +264,7 @@ pub const BeamState = struct {
     }
 
     pub fn process_block(self: *Self, allocator: Allocator, staged_block: BeamBlock, logger: zeam_utils.ModuleLogger) !void {
-        if (self.slot < staged_block.slot) {
-            try self.process_slots(allocator, staged_block.slot, logger);
-        } else if (self.slot != staged_block.slot) {
-            logger.err("process-block: invalid pre-state slot={d} > block-slot={d}", .{ self.slot, staged_block.slot });
-            return StateTransitionError.InvalidPreState;
-        }
-
+        // start block processing
         try self.process_block_header(allocator, staged_block, logger);
         // PQ devner-0 has no execution
         // try process_execution_payload_header(state, block);
@@ -287,10 +280,9 @@ pub const BeamState = struct {
         const attestations_timer = zeam_metrics.lean_state_transition_attestations_processing_time_seconds.start();
         defer _ = attestations_timer.observe();
         const attestation_count: u64 = @intCast(attestations.constSlice().len);
-        if (attestation_count > 0) {
-            if (comptime !zeam_metrics.isZKVM()) {
-                zeam_metrics.metrics.lean_state_transition_attestations_processed_total.incrBy(attestation_count);
-            }
+
+        if (comptime !zeam_metrics.isZKVM()) {
+            zeam_metrics.metrics.lean_state_transition_attestations_processed_total.incrBy(attestation_count);
         }
 
         logger.debug("process attestations slot={d} \n prestate:historical hashes={d} justified slots ={d} attestations={d}, ", .{ self.slot, self.historical_block_hashes.len(), self.justified_slots.len(), attestations.constSlice().len });
