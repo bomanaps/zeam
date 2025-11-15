@@ -72,6 +72,7 @@ pub const NodeOptions = struct {
         allocator.free(self.bootnodes);
         allocator.free(self.validator_indices);
         allocator.free(self.local_priv_key);
+        allocator.free(self.genesis_spec.validator_pubkeys);
     }
 };
 
@@ -344,7 +345,24 @@ pub fn buildStartOptions(allocator: std.mem.Allocator, node_cmd: NodeCommand, op
     if (bootnodes.len == 0) {
         return error.InvalidNodesConfig;
     }
-    const genesis_spec = try configs.genesisConfigFromYAML(parsed_config, node_cmd.override_genesis_time);
+
+    // Parse genesis configuration (time and validator count)
+    const genesis_config = try configs.genesisConfigFromYAML(parsed_config, node_cmd.override_genesis_time);
+
+    // Generate validator keys using key manager
+    const key_manager_lib = @import("@zeam/key-manager");
+    var key_manager = try key_manager_lib.getTestKeyManager(allocator, genesis_config.validator_count, 10000);
+    defer key_manager.deinit();
+
+    // Extract all validator public keys
+    const validator_pubkeys = try key_manager.getAllPubkeys(allocator, genesis_config.validator_count);
+    errdefer allocator.free(validator_pubkeys);
+
+    // Create the full GenesisSpec
+    const genesis_spec = types.GenesisSpec{
+        .genesis_time = genesis_config.genesis_time,
+        .validator_pubkeys = validator_pubkeys,
+    };
 
     const validator_indices = try validatorIndicesFromYAML(allocator, opts.node_key, parsed_validators);
     errdefer allocator.free(validator_indices);
