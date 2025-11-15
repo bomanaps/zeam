@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const process = std.process;
 const net = std.net;
@@ -442,6 +443,11 @@ fn cleanupNetworkDirectory(allocator: Allocator, network_dir: []const u8) !void 
 }
 
 test "lean_quickstart_two_node_finalization_integration" {
+    if (builtin.os.tag == .macos) {
+        std.debug.print("⏭️  Skipping lean-quickstart integration test on macOS (Docker host networking unsupported)\n", .{});
+        return error.SkipZigTest;
+    }
+
     var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_allocator.deinit();
     const allocator = arena_allocator.allocator();
