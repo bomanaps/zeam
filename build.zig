@@ -204,6 +204,7 @@ pub fn build(b: *Builder) !void {
     zeam_key_manager.addImport("@zeam/xmss", zeam_xmss);
     zeam_key_manager.addImport("@zeam/types", zeam_types);
     zeam_key_manager.addImport("ssz", ssz);
+    zeam_configs.addImport("@zeam/key-manager", zeam_key_manager);
 
     // add zeam-state-transition
     const zeam_state_transition = b.addModule("@zeam/state-transition", .{
@@ -336,6 +337,7 @@ pub fn build(b: *Builder) !void {
     cli_exe.root_module.addImport("enr", enr);
     cli_exe.root_module.addImport("yaml", yaml);
     cli_exe.root_module.addImport("@zeam/key-manager", zeam_key_manager);
+    cli_exe.root_module.addImport("@zeam/xmss", zeam_xmss);
 
     cli_exe.step.dependOn(&build_rust_lib_steps.step);
     addRustGlueLib(b, cli_exe, target, prover);

@@ -19,6 +19,7 @@ const Chain = configs.Chain;
 const ChainOptions = configs.ChainOptions;
 
 const utils_lib = @import("@zeam/utils");
+const hashsig_manifest = @import("hashsig_manifest.zig");
 
 const database = @import("@zeam/database");
 
@@ -132,6 +133,7 @@ const ZeamArgs = struct {
             },
         },
         node: NodeCommand,
+        hashsig: HashSigCommand,
 
         pub const __messages__ = .{
             .clock = "Run the clock service for slot timing",
@@ -139,6 +141,7 @@ const ZeamArgs = struct {
             .prove = "Generate and verify ZK proofs for state transitions on a mock chain",
             .prometheus = "Prometheus configuration management",
             .node = "Run a lean node",
+            .hashsig = "HashSig utilities (validator manifests, pubkeys)",
         };
     },
 
@@ -158,6 +161,41 @@ const ZeamArgs = struct {
 
 const error_handler = @import("error_handler.zig");
 const ErrorHandler = error_handler.ErrorHandler;
+
+const HashSigCommand = struct {
+    help: bool = false,
+
+    __commands__: union(enum) {
+        manifest: ManifestCommand,
+
+        pub const __messages__ = .{
+            .manifest = "Generate validator-manifest.yaml and pubkey list",
+        };
+    },
+};
+
+const ManifestCommand = struct {
+    genesis_dir: []const u8 = ".",
+    manifest_output: []const u8 = "",
+    pubkeys_output: []const u8 = "",
+    validator_config: []const u8 = "",
+    validators_file: []const u8 = "",
+    help: bool = false,
+
+    pub const __messages__ = .{
+        .genesis_dir = "Genesis directory containing validator-config.yaml and validators.yaml",
+        .manifest_output = "Output path for validator-manifest.yaml (defaults inside genesis dir)",
+        .pubkeys_output = "Output path for genesis validator list (defaults inside genesis dir)",
+        .validator_config = "Override path to validator-config.yaml",
+        .validators_file = "Override path to validators.yaml",
+    };
+
+    pub const __shorts__ = .{
+        .genesis_dir = .g,
+        .manifest_output = .m,
+        .pubkeys_output = .p,
+    };
+};
 
 pub fn main() void {
     mainInner() catch |err| {
@@ -511,7 +549,58 @@ fn mainInner() !void {
                 return err;
             };
         },
+        .hashsig => |hashsigcmd| {
+            try handleHashSigCommand(allocator, hashsigcmd);
+        },
     }
+}
+
+fn handleHashSigCommand(allocator: std.mem.Allocator, hashsigcmd: HashSigCommand) !void {
+    switch (hashsigcmd.__commands__) {
+        .manifest => |manifest_cmd| try handleHashSigManifest(allocator, manifest_cmd),
+    }
+}
+
+fn handleHashSigManifest(allocator: std.mem.Allocator, cmd: ManifestCommand) !void {
+    const validator_config_path = try resolvePath(allocator, cmd.genesis_dir, cmd.validator_config, "validator-config.yaml");
+    defer allocator.free(validator_config_path);
+    const validators_path = try resolvePath(allocator, cmd.genesis_dir, cmd.validators_file, "validators.yaml");
+    defer allocator.free(validators_path);
+    const manifest_path = try resolvePath(allocator, cmd.genesis_dir, cmd.manifest_output, "validator-manifest.yaml");
+    defer allocator.free(manifest_path);
+    const pubkeys_path = try resolvePath(allocator, cmd.genesis_dir, cmd.pubkeys_output, "genesis_validators.yaml");
+    defer allocator.free(pubkeys_path);
+
+    var validator_config_yaml = try utils_lib.loadFromYAMLFile(allocator, validator_config_path);
+    defer validator_config_yaml.deinit(allocator);
+    var validators_yaml = try utils_lib.loadFromYAMLFile(allocator, validators_path);
+    defer validators_yaml.deinit(allocator);
+
+    const total = try hashsig_manifest.generate(.{
+        .allocator = allocator,
+        .validator_config = validator_config_yaml,
+        .validators = validators_yaml,
+        .manifest_path = manifest_path,
+        .pubkeys_path = pubkeys_path,
+    });
+
+    std.log.info("Generated validator manifest ({d} validators)\n  manifest: {s}\n  pubkeys: {s}", .{
+        total,
+        manifest_path,
+        pubkeys_path,
+    });
+}
+
+fn resolvePath(
+    allocator: std.mem.Allocator,
+    base_dir: []const u8,
+    override_path: []const u8,
+    default_name: []const u8,
+) ![]const u8 {
+    if (override_path.len != 0) {
+        return allocator.dupe(u8, override_path);
+    }
+    return std.fs.path.join(allocator, &[_][]const u8{ base_dir, default_name });
 }
 
 test {
