@@ -36,6 +36,11 @@ const ValidatorEntry = struct {
     pubkey: types.Bytes52,
 };
 
+/// Generates validator manifest files from YAML configuration.
+///
+/// Inputs: `validator_config` (validators with name/privkey) and `validators` (name -> indices mapping).
+/// Outputs: `manifest_path` (YAML with 0x-prefixed pubkeys) and `pubkeys_path` (ordered hex list, no 0x prefix).
+/// Returns total validator count. Errors: `InvalidYamlShape`, `MissingValidatorsArray`, `MissingValidatorName`, `MissingValidatorPrivkey`, `MissingValidatorIndices`, `InvalidValidatorIndex`, `DuplicateValidatorIndex`, `InvalidPubkeyLength`, `InvalidGenesisLayout`, `MissingValidatorAssignments`.
 pub fn generate(opts: ManifestOptions) !usize {
     var entries = try collectValidatorEntries(opts.allocator, opts.validator_config, opts.validators);
     defer {
@@ -63,6 +68,13 @@ fn collectValidatorEntries(
     const validator_nodes = config_root.get("validators") orelse return ManifestError.MissingValidatorsArray;
 
     var entries = std.ArrayList(ValidatorEntry).init(allocator);
+    errdefer {
+        for (entries.items) |entry| {
+            allocator.free(entry.name);
+            allocator.free(entry.indices);
+        }
+        entries.deinit();
+    }
 
     for (validator_nodes.list) |node_entry| {
         const node_map = node_entry.map;
@@ -73,11 +85,9 @@ fn collectValidatorEntries(
         if (privkey_value != .string) return ManifestError.InvalidYamlShape;
 
         const name = try allocator.dupe(u8, name_value.string);
-        errdefer allocator.free(name);
         const privkey = privkey_value.string;
 
         const indices = try collectValidatorIndices(allocator, validators, name);
-        errdefer allocator.free(indices);
 
         const pubkey = try derivePubkeyFromSeed(allocator, privkey);
 
@@ -200,8 +210,7 @@ fn writePubkeyList(
     defer file.close();
     var writer = file.writer();
 
-    for (ordered, 0..) |pubkey, idx| {
-        _ = idx;
+    for (ordered) |pubkey| {
         // Write as plain hex WITHOUT 0x prefix and WITH quotes
         // The 0x prefix causes YAML parser to treat it as float even when quoted
         const hex_no_prefix = try std.fmt.allocPrint(allocator, "{s}", .{std.fmt.fmtSliceHexLower(&pubkey)});

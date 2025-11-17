@@ -52,6 +52,7 @@ const ChainConfigError = error{
 };
 
 const GenesisConfigError = error{
+    InvalidYamlShape,
     MissingGenesisTime,
     InvalidGenesisTime,
     MissingValidatorConfig,
@@ -59,12 +60,20 @@ const GenesisConfigError = error{
     InvalidValidatorCount,
 };
 
+/// Parses genesis configuration from YAML.
+///
+/// Required: `GENESIS_TIME` (integer >= 0).
+/// Optional: `genesis_validators` (list of 104-char hex strings) or `VALIDATOR_COUNT` (integer > 0).
+/// If both are present, `genesis_validators` takes precedence.
+///
+/// Returns `GenesisSpec` with genesis time and validator pubkeys.
+/// Errors: `InvalidYamlShape`, `MissingGenesisTime`, `InvalidGenesisTime`, `MissingValidatorConfig`, `InvalidValidatorPubkeys`, `InvalidValidatorCount`.
 pub fn genesisConfigFromYAML(
     allocator: Allocator,
     config: Yaml,
     override_genesis_time: ?u64,
 ) !types.GenesisSpec {
-    if (config.docs.items.len == 0) return GenesisConfigError.InvalidGenesisTime;
+    if (config.docs.items.len == 0) return GenesisConfigError.InvalidYamlShape;
     const root = config.docs.items[0].map;
 
     const genesis_time_node = root.get("GENESIS_TIME") orelse return GenesisConfigError.MissingGenesisTime;
@@ -116,10 +125,8 @@ fn parsePubkeysFromYaml(
 
     for (list, 0..) |item, idx| {
         // The Zig YAML library has a bug where it parses quoted "0x..." as float
-        // We handle both .string (correct) and fall back to VALIDATOR_COUNT if not
+        // If any item is not a string, return an error as the YAML is malformed
         if (item != .string) {
-            // If any item is not a string, the YAML is malformed
-            // Fall back to using VALIDATOR_COUNT instead
             allocator.free(pubkeys);
             return GenesisConfigError.InvalidValidatorPubkeys;
         }
