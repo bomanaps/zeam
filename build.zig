@@ -492,6 +492,8 @@ pub fn build(b: *Builder) !void {
     configs_tests.root_module.addImport("@zeam/types", zeam_types);
     configs_tests.root_module.addImport("@zeam/params", zeam_params);
     configs_tests.root_module.addImport("yaml", yaml);
+    configs_tests.step.dependOn(&build_rust_lib_steps.step);
+    addRustGlueLib(b, configs_tests, target, prover);
     const run_configs_tests = b.addRunArtifact(configs_tests);
     test_step.dependOn(&run_configs_tests.step);
 
