@@ -15,6 +15,7 @@ const xev = @import("xev");
 const networks = @import("@zeam/network");
 const Multiaddr = @import("multiformats").multiaddr.Multiaddr;
 const node_lib = @import("@zeam/node");
+const key_manager_lib = @import("@zeam/key-manager");
 const Clock = node_lib.Clock;
 const BeamNode = node_lib.BeamNode;
 const types = @import("@zeam/types");
@@ -23,8 +24,9 @@ const NodeCommand = @import("main.zig").NodeCommand;
 const zeam_utils = @import("@zeam/utils");
 const constants = @import("constants.zig");
 const database = @import("@zeam/database");
+const xmss = @import("@zeam/xmss");
 
-const prefix = "zeam_";
+const default_active_epochs: usize = 1024;
 
 // Structure to hold parsed ENR fields from validator-config.yaml
 const EnrFields = struct {
@@ -87,7 +89,7 @@ pub const Node = struct {
     allocator: std.mem.Allocator,
     logger: zeam_utils.ModuleLogger,
     db: database.Db,
-    key_manager: @import("@zeam/key-manager").KeyManager,
+    key_manager: key_manager_lib.KeyManager,
 
     const Self = @This();
 
@@ -111,8 +113,7 @@ pub const Node = struct {
         var chain_options = (try json.parseFromSlice(ChainOptions, allocator, chain_spec, json_options)).value;
         chain_options.genesis_time = options.genesis_spec.genesis_time;
 
-        // Set validator_pubkeys from genesis_spec (which comes from YAML or testing)
-        // TODO: Once genesisConfigFromYAML is implemented, this will read from config.yaml
+        // Set validator_pubkeys from genesis_spec (read from config.yaml via genesisConfigFromYAML)
         chain_options.validator_pubkeys = options.genesis_spec.validator_pubkeys;
 
         // transfer ownership of the chain_options to ChainConfig
@@ -142,11 +143,15 @@ pub const Node = struct {
         var db = try database.Db.open(allocator, options.logger_config.logger(.database), options.database_path);
         errdefer db.deinit();
 
-        // Create testing keymanager (TODO: replace with file-based keymanager in followup PR)
-        const key_manager_lib = @import("@zeam/key-manager");
-        const num_validators: usize = @intCast(chain_config.genesis.numValidators());
-        self.key_manager = try key_manager_lib.getTestKeyManager(allocator, num_validators, 10000);
+        self.key_manager = key_manager_lib.KeyManager.init(allocator);
         errdefer self.key_manager.deinit();
+
+        try loadValidatorKeysForNode(
+            allocator,
+            &self.key_manager,
+            options.local_priv_key,
+            options.validator_indices,
+        );
 
         try self.beam_node.init(allocator, .{
             .nodeId = @intCast(options.node_key_index),
@@ -655,7 +660,45 @@ fn constructENRFromFields(allocator: std.mem.Allocator, private_key: []const u8,
     return enr;
 }
 
-// TODO: Enable and update the this test once the YAML parsing for public keys PR is added
+fn loadValidatorKeysForNode(
+    allocator: std.mem.Allocator,
+    key_manager: *key_manager_lib.KeyManager,
+    privkey_seed: []const u8,
+    validator_indices: []const usize,
+) !void {
+    if (validator_indices.len == 0) return error.InvalidValidatorConfig;
+
+    for (validator_indices) |validator_index| {
+        var keypair = try xmss.KeyPair.generate(
+            allocator,
+            privkey_seed,
+            0,
+            default_active_epochs,
+        );
+        errdefer keypair.deinit();
+
+        try key_manager.addKeypair(validator_index, keypair);
+    }
+}
+
+test "loadValidatorKeysForNode loads XMSS keypairs for node indices" {
+    var key_manager = key_manager_lib.KeyManager.init(std.testing.allocator);
+    defer key_manager.deinit();
+
+    const indices = [_]usize{ 0, 1 };
+    try loadValidatorKeysForNode(
+        std.testing.allocator,
+        &key_manager,
+        "bdf953adc161873ba026330c56450453f582e3c4ee6cb713644794bcfdd85fe5",
+        indices[0..],
+    );
+
+    var buffer: [52]u8 = undefined;
+    _ = try key_manager.getPublicKeyBytes(0, &buffer);
+    _ = try key_manager.getPublicKeyBytes(1, &buffer);
+}
+
+// TODO: Enable and update this test - YAML parsing for public keys is now implemented, but test expectations may need adjustment
 // test "config yaml parsing" {
 //     var config1 = try utils_lib.loadFromYAMLFile(std.testing.allocator, "pkgs/cli/test/fixtures/config.yaml");
 //     defer config1.deinit(std.testing.allocator);
