@@ -294,16 +294,11 @@ fn mainInner() !void {
             };
             var chain_options = (try json.parseFromSlice(ChainOptions, gpa.allocator(), chain_spec, options)).value;
 
-            const time_now_ms: usize = @intCast(std.time.milliTimestamp());
-            const time_now: usize = @intCast(time_now_ms / std.time.ms_per_s);
-
-            chain_options.genesis_time = time_now;
-
             // Create key manager FIRST to get validator pubkeys for genesis
             const key_manager_lib = @import("@zeam/key-manager");
             // Using 3 validators: so by default beam cmd command runs two nodes to interop
             const num_validators: usize = 3;
-            var key_manager = try key_manager_lib.getTestKeyManager(allocator, num_validators, 10000);
+            var key_manager = try key_manager_lib.getTestKeyManager(allocator, num_validators, 1000);
             defer key_manager.deinit();
 
             // Get validator pubkeys from keymanager
@@ -314,6 +309,10 @@ fn mainInner() !void {
             // Set validator_pubkeys in chain_options
             chain_options.validator_pubkeys = pubkeys;
             owns_pubkeys = false; // ownership moved into genesis spec
+
+            const time_now_ms: usize = @intCast(std.time.milliTimestamp());
+            const time_now: usize = @intCast(time_now_ms / std.time.ms_per_s);
+            chain_options.genesis_time = time_now;
 
             // transfer ownership of the chain_options to ChainConfig
             const chain_config = try ChainConfig.init(Chain.custom, chain_options);
