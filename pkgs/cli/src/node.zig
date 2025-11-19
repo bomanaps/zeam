@@ -6,7 +6,6 @@ const Yaml = @import("yaml").Yaml;
 const configs = @import("@zeam/configs");
 const api = @import("@zeam/api");
 const api_server = @import("api_server.zig");
-const json = std.json;
 const ChainConfig = configs.ChainConfig;
 const Chain = configs.Chain;
 const ChainOptions = configs.ChainOptions;
@@ -16,6 +15,7 @@ const networks = @import("@zeam/network");
 const Multiaddr = @import("multiformats").multiaddr.Multiaddr;
 const node_lib = @import("@zeam/node");
 const key_manager_lib = @import("@zeam/key-manager");
+const xmss = @import("@zeam/xmss");
 const Clock = node_lib.Clock;
 const BeamNode = node_lib.BeamNode;
 const types = @import("@zeam/types");
@@ -24,9 +24,7 @@ const NodeCommand = @import("main.zig").NodeCommand;
 const zeam_utils = @import("@zeam/utils");
 const constants = @import("constants.zig");
 const database = @import("@zeam/database");
-const xmss = @import("@zeam/xmss");
-
-const default_active_epochs: usize = 1024;
+const json = std.json;
 
 // Structure to hold parsed ENR fields from validator-config.yaml
 const EnrFields = struct {
@@ -68,12 +66,14 @@ pub const NodeOptions = struct {
     local_priv_key: []const u8,
     logger_config: *LoggerConfig,
     database_path: []const u8,
+    hash_sig_key_dir: []const u8,
 
     pub fn deinit(self: *NodeOptions, allocator: std.mem.Allocator) void {
         for (self.bootnodes) |b| allocator.free(b);
         allocator.free(self.bootnodes);
         allocator.free(self.validator_indices);
         allocator.free(self.local_priv_key);
+        allocator.free(self.hash_sig_key_dir);
     }
 };
 
@@ -93,7 +93,11 @@ pub const Node = struct {
 
     const Self = @This();
 
-    pub fn init(self: *Self, allocator: std.mem.Allocator, options: *const NodeOptions) !void {
+    pub fn init(
+        self: *Self,
+        allocator: std.mem.Allocator,
+        options: *const NodeOptions,
+    ) !void {
         self.allocator = allocator;
         self.options = options;
 
@@ -143,15 +147,11 @@ pub const Node = struct {
         var db = try database.Db.open(allocator, options.logger_config.logger(.database), options.database_path);
         errdefer db.deinit();
 
+        const num_validators: usize = @intCast(chain_config.genesis.numValidators());
         self.key_manager = key_manager_lib.KeyManager.init(allocator);
         errdefer self.key_manager.deinit();
 
-        try loadValidatorKeysForNode(
-            allocator,
-            &self.key_manager,
-            options.local_priv_key,
-            options.validator_indices,
-        );
+        try self.loadValidatorKeypairs(num_validators);
 
         try self.beam_node.init(allocator, .{
             .nodeId = @intCast(options.node_key_index),
@@ -294,13 +294,64 @@ pub const Node = struct {
 
         return .{ .listen_addresses = listen_addresses, .connect_peers = connect_peers };
     }
+
+    fn loadValidatorKeypairs(
+        self: *Self,
+        num_validators: usize,
+    ) !void {
+        if (self.options.validator_indices.len == 0) {
+            return error.NoValidatorAssignments;
+        }
+
+        const hash_sig_key_dir = self.options.hash_sig_key_dir;
+
+        for (self.options.validator_indices) |validator_index| {
+            if (validator_index >= num_validators) {
+                return error.HashSigValidatorIndexOutOfRange;
+            }
+
+            const pk_path = try std.fmt.allocPrint(self.allocator, "{s}/validator_{d}_pk.json", .{ hash_sig_key_dir, validator_index });
+            defer self.allocator.free(pk_path);
+
+            var pk_file = std.fs.cwd().openFile(pk_path, .{}) catch |err| switch (err) {
+                error.FileNotFound => return error.HashSigPublicKeyMissing,
+                else => return err,
+            };
+            defer pk_file.close();
+            const public_json = try pk_file.readToEndAlloc(self.allocator, constants.MAX_HASH_SIG_KEY_JSON_SIZE);
+            defer self.allocator.free(public_json);
+
+            const sk_path = try std.fmt.allocPrint(self.allocator, "{s}/validator_{d}_sk.json", .{ hash_sig_key_dir, validator_index });
+            defer self.allocator.free(sk_path);
+
+            var sk_file = std.fs.cwd().openFile(sk_path, .{}) catch |err| switch (err) {
+                error.FileNotFound => return error.HashSigSecretKeyMissing,
+                else => return err,
+            };
+            defer sk_file.close();
+            const secret_json = try sk_file.readToEndAlloc(self.allocator, constants.MAX_HASH_SIG_KEY_JSON_SIZE);
+            defer self.allocator.free(secret_json);
+
+            var keypair = try xmss.KeyPair.fromJson(
+                self.allocator,
+                secret_json,
+                public_json,
+            );
+            errdefer keypair.deinit();
+
+            try self.key_manager.addKeypair(validator_index, keypair);
+        }
+    }
 };
 
 /// Builds the start options for a node based on the provided command and options.
 /// It loads the necessary configuration files, parses them, and populates the
 /// `StartNodeOptions` structure.
-/// The caller is responsible for freeing the allocated resources in `StartNodeOptions`.
-pub fn buildStartOptions(allocator: std.mem.Allocator, node_cmd: NodeCommand, opts: *NodeOptions) !void {
+pub fn buildStartOptions(
+    allocator: std.mem.Allocator,
+    node_cmd: NodeCommand,
+    opts: *NodeOptions,
+) !void {
     try utils_lib.checkDIRExists(node_cmd.custom_genesis);
 
     const config_filepath = try std.mem.concat(allocator, u8, &[_][]const u8{ node_cmd.custom_genesis, "/config.yaml" });
@@ -358,11 +409,20 @@ pub fn buildStartOptions(allocator: std.mem.Allocator, node_cmd: NodeCommand, op
     }
     const local_priv_key = try getPrivateKeyFromValidatorConfig(allocator, opts.node_key, parsed_validator_config);
 
+    const node_key_index = try nodeKeyIndexFromYaml(opts.node_key, parsed_validator_config);
+
+    const hash_sig_key_dir = try std.mem.concat(allocator, u8, &[_][]const u8{
+        node_cmd.custom_genesis,
+        "/",
+        node_cmd.@"sig-keys-dir",
+    });
+
     opts.bootnodes = bootnodes;
     opts.validator_indices = validator_indices;
     opts.local_priv_key = local_priv_key;
     opts.genesis_spec = genesis_spec;
-    opts.node_key_index = try nodeKeyIndexFromYaml(opts.node_key, parsed_validator_config);
+    opts.node_key_index = node_key_index;
+    opts.hash_sig_key_dir = hash_sig_key_dir;
 }
 
 /// Parses the nodes from a YAML configuration.
@@ -658,44 +718,6 @@ fn constructENRFromFields(allocator: std.mem.Allocator, private_key: []const u8,
     try ENR.decodeTxtInto(&enr, enr_text);
 
     return enr;
-}
-
-fn loadValidatorKeysForNode(
-    allocator: std.mem.Allocator,
-    key_manager: *key_manager_lib.KeyManager,
-    privkey_seed: []const u8,
-    validator_indices: []const usize,
-) !void {
-    if (validator_indices.len == 0) return error.InvalidValidatorConfig;
-
-    for (validator_indices) |validator_index| {
-        var keypair = try xmss.KeyPair.generate(
-            allocator,
-            privkey_seed,
-            0,
-            default_active_epochs,
-        );
-        errdefer keypair.deinit();
-
-        try key_manager.addKeypair(validator_index, keypair);
-    }
-}
-
-test "loadValidatorKeysForNode loads XMSS keypairs for node indices" {
-    var key_manager = key_manager_lib.KeyManager.init(std.testing.allocator);
-    defer key_manager.deinit();
-
-    const indices = [_]usize{ 0, 1 };
-    try loadValidatorKeysForNode(
-        std.testing.allocator,
-        &key_manager,
-        "bdf953adc161873ba026330c56450453f582e3c4ee6cb713644794bcfdd85fe5",
-        indices[0..],
-    );
-
-    var buffer: [52]u8 = undefined;
-    _ = try key_manager.getPublicKeyBytes(0, &buffer);
-    _ = try key_manager.getPublicKeyBytes(1, &buffer);
 }
 
 // TODO: Enable and update this test - YAML parsing for public keys is now implemented, but test expectations may need adjustment

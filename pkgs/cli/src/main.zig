@@ -51,6 +51,7 @@ pub const NodeCommand = struct {
     metrics_enable: bool = false,
     metrics_port: u16 = constants.DEFAULT_METRICS_PORT,
     override_genesis_time: ?u64,
+    @"sig-keys-dir": []const u8 = "hash-sig-keys",
     @"network-dir": []const u8 = "./network",
     @"data-dir": []const u8 = constants.DEFAULT_DATA_DIR,
 
@@ -68,6 +69,7 @@ pub const NodeCommand = struct {
         .metrics_enable = "Enable metrics endpoint",
         .@"network-dir" = "Directory to store network related information, e.g., peer ids, keys, etc.",
         .override_genesis_time = "Override genesis time in the config.yaml",
+        .@"sig-keys-dir" = "Relative or absolute path to signature key directory",
         .@"data-dir" = "Path to the data directory",
         .help = "Show help information for the node command",
     };
@@ -486,6 +488,7 @@ fn mainInner() !void {
                 .local_priv_key = undefined,
                 .logger_config = &zeam_logger_config,
                 .database_path = leancmd.@"data-dir",
+                .hash_sig_key_dir = undefined,
             };
 
             defer start_options.deinit(allocator);

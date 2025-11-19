@@ -10,7 +10,6 @@ pub const ChainOptions = utils.Partial(utils.MixIn(types.GenesisSpec, types.Chai
 
 const configs = @import("./configs/mainnet.zig");
 const Yaml = @import("yaml").Yaml;
-const key_manager_lib = @import("@zeam/key-manager");
 
 pub const Chain = enum { custom };
 
@@ -57,17 +56,16 @@ const GenesisConfigError = error{
     InvalidGenesisTime,
     MissingValidatorConfig,
     InvalidValidatorPubkeys,
-    InvalidValidatorCount,
 };
 
 /// Parses genesis configuration from YAML.
 ///
-/// Required: `GENESIS_TIME` (integer >= 0).
-/// Optional: `genesis_validators` (list of 104-char hex strings) or `VALIDATOR_COUNT` (integer > 0).
-/// If both are present, `genesis_validators` takes precedence.
+/// Required fields:
+/// - `GENESIS_TIME`: integer >= 0
+/// - `GENESIS_VALIDATORS`: list of 52-byte public keys encoded as 104-char hex strings
 ///
-/// Returns `GenesisSpec` with genesis time and validator pubkeys.
-/// Errors: `InvalidYamlShape`, `MissingGenesisTime`, `InvalidGenesisTime`, `MissingValidatorConfig`, `InvalidValidatorPubkeys`, `InvalidValidatorCount`.
+/// Returns `GenesisSpec` populated with the provided genesis time (optionally overridden) and validator pubkeys.
+/// Errors: `InvalidYamlShape`, `MissingGenesisTime`, `InvalidGenesisTime`, `MissingValidatorConfig`, `InvalidValidatorPubkeys`.
 pub fn genesisConfigFromYAML(
     allocator: Allocator,
     config: Yaml,
@@ -87,25 +85,8 @@ pub fn genesisConfigFromYAML(
     };
     if (override_genesis_time) |override| genesis_time = override;
 
-    if (root.get("genesis_validators")) |pubkeys_node| {
-        const pubkeys = try parsePubkeysFromYaml(allocator, pubkeys_node);
-        return types.GenesisSpec{
-            .genesis_time = genesis_time,
-            .validator_pubkeys = pubkeys,
-        };
-    }
-
-    const validator_count_node = root.get("VALIDATOR_COUNT") orelse return GenesisConfigError.MissingValidatorConfig;
-    const validator_count = switch (validator_count_node) {
-        .int => |value| blk: {
-            if (value <= 0) return GenesisConfigError.InvalidValidatorCount;
-            const casted: usize = @intCast(value);
-            break :blk casted;
-        },
-        else => return GenesisConfigError.InvalidValidatorCount,
-    };
-
-    const pubkeys = try synthesizePubkeys(allocator, validator_count);
+    const pubkeys_node = root.get("GENESIS_VALIDATORS") orelse return GenesisConfigError.MissingValidatorConfig;
+    const pubkeys = try parsePubkeysFromYaml(allocator, pubkeys_node);
     return types.GenesisSpec{
         .genesis_time = genesis_time,
         .validator_pubkeys = pubkeys,
@@ -126,10 +107,7 @@ fn parsePubkeysFromYaml(
     for (list, 0..) |item, idx| {
         // The Zig YAML library has a bug where it parses quoted "0x..." as float
         // If any item is not a string, return an error as the YAML is malformed
-        if (item != .string) {
-            allocator.free(pubkeys);
-            return GenesisConfigError.InvalidValidatorPubkeys;
-        }
+        if (item != .string) return GenesisConfigError.InvalidValidatorPubkeys;
         pubkeys[idx] = try hexToBytes52(item.string);
     }
 
@@ -151,23 +129,6 @@ fn hexToBytes52(input: []const u8) !types.Bytes52 {
     return bytes;
 }
 
-fn synthesizePubkeys(
-    allocator: Allocator,
-    count: usize,
-) ![]types.Bytes52 {
-    var key_manager = try key_manager_lib.getTestKeyManager(allocator, count, 1024);
-    defer key_manager.deinit();
-
-    var pubkeys = try allocator.alloc(types.Bytes52, count);
-    errdefer allocator.free(pubkeys);
-
-    for (0..count) |i| {
-        _ = try key_manager.getPublicKeyBytes(i, pubkeys[i][0..]);
-    }
-
-    return pubkeys;
-}
-
 // TODO: Enable and update the this test once the YAML parsing for public keys PR is added
 // test "load genesis config from yaml" {
 //     const yaml_content =
@@ -175,7 +136,9 @@ fn synthesizePubkeys(
 //         \\GENESIS_TIME: 1704085200
 //         \\
 //         \\# Validator Settings
-//         \\VALIDATOR_COUNT: 9
+//         \\GENESIS_VALIDATORS:
+//         \\  - "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f30313233"
+//         \\  - "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f3031323334"
 //     ;
 //
 //     var yaml: Yaml = .{ .source = yaml_content };
@@ -185,11 +148,11 @@ fn synthesizePubkeys(
 //     const genesis_config = try genesisConfigFromYAML(yaml, null);
 //
 //     try std.testing.expect(genesis_config.genesis_time == 1704085200);
-//     try std.testing.expect(genesis_config.num_validators() == 9);
+//     try std.testing.expect(genesis_config.num_validators() == 2);
 //
 //     const genesis_config_override = try genesisConfigFromYAML(yaml, 1234);
 //     try std.testing.expect(genesis_config_override.genesis_time == 1234);
-//     try std.testing.expect(genesis_config_override.num_validators() == 9);
+//     try std.testing.expect(genesis_config_override.num_validators() == 2);
 // }
 
 // TODO: Enable and update this test once the keymanager file-reading PR is added (followup PR)

@@ -204,7 +204,6 @@ pub fn build(b: *Builder) !void {
     zeam_key_manager.addImport("@zeam/xmss", zeam_xmss);
     zeam_key_manager.addImport("@zeam/types", zeam_types);
     zeam_key_manager.addImport("ssz", ssz);
-    zeam_configs.addImport("@zeam/key-manager", zeam_key_manager);
 
     // add zeam-state-transition
     const zeam_state_transition = b.addModule("@zeam/state-transition", .{
@@ -332,12 +331,12 @@ pub fn build(b: *Builder) !void {
     cli_exe.root_module.addImport("@zeam/network", zeam_network);
     cli_exe.root_module.addImport("@zeam/node", zeam_beam_node);
     cli_exe.root_module.addImport("@zeam/api", zeam_api);
+    cli_exe.root_module.addImport("@zeam/xmss", zeam_xmss);
     cli_exe.root_module.addImport("metrics", metrics);
     cli_exe.root_module.addImport("multiformats", multiformats);
     cli_exe.root_module.addImport("enr", enr);
     cli_exe.root_module.addImport("yaml", yaml);
     cli_exe.root_module.addImport("@zeam/key-manager", zeam_key_manager);
-    cli_exe.root_module.addImport("@zeam/xmss", zeam_xmss);
 
     cli_exe.step.dependOn(&build_rust_lib_steps.step);
     addRustGlueLib(b, cli_exe, target, prover);
@@ -492,8 +491,6 @@ pub fn build(b: *Builder) !void {
     configs_tests.root_module.addImport("@zeam/types", zeam_types);
     configs_tests.root_module.addImport("@zeam/params", zeam_params);
     configs_tests.root_module.addImport("yaml", yaml);
-    configs_tests.step.dependOn(&build_rust_lib_steps.step);
-    addRustGlueLib(b, configs_tests, target, prover);
     const run_configs_tests = b.addRunArtifact(configs_tests);
     test_step.dependOn(&run_configs_tests.step);
 
