@@ -2,7 +2,6 @@ use hashsig::{signature::SignatureScheme, MESSAGE_LENGTH};
 use rand::Rng;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
-use serde_json;
 use sha2::{Digest, Sha256};
 use std::ffi::CStr;
 use std::os::raw::c_char;
