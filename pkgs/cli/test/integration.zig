@@ -40,19 +40,6 @@ fn getZeamExecutable() ![]const u8 {
 /// Handles the complete process lifecycle: creation, spawning, and waiting for readiness
 /// Returns the process handle for cleanup, or error if startup fails
 fn spinBeamSimNode(allocator: std.mem.Allocator, exe_path: []const u8) !*process.Child {
-    // Ensure we start from a clean data directory to avoid leftover state between test runs
-    if (std.fs.cwd().statFile(constants.DEFAULT_DATA_DIR)) |_| {
-        std.fs.cwd().deleteTree(constants.DEFAULT_DATA_DIR) catch |err| return err;
-    } else |err| switch (err) {
-        error.FileNotFound => {},
-        else => return err,
-    }
-
-    std.fs.cwd().makePath(constants.DEFAULT_DATA_DIR) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
-
     // Set up process with beam command and mock network
     const args = [_][]const u8{ exe_path, "beam", "--mockNetwork", "true" };
     const cli_process = try allocator.create(process.Child);
