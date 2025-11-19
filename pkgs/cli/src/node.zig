@@ -347,6 +347,7 @@ pub const Node = struct {
 /// Builds the start options for a node based on the provided command and options.
 /// It loads the necessary configuration files, parses them, and populates the
 /// `StartNodeOptions` structure.
+/// The caller is responsible for freeing the allocated resources in `StartNodeOptions`.
 pub fn buildStartOptions(
     allocator: std.mem.Allocator,
     node_cmd: NodeCommand,

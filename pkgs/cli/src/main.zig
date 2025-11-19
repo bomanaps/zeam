@@ -69,7 +69,7 @@ pub const NodeCommand = struct {
         .metrics_enable = "Enable metrics endpoint",
         .@"network-dir" = "Directory to store network related information, e.g., peer ids, keys, etc.",
         .override_genesis_time = "Override genesis time in the config.yaml",
-        .@"sig-keys-dir" = "Relative or absolute path to signature key directory",
+        .@"sig-keys-dir" = "Relative path of custom genesis to signature key directory",
         .@"data-dir" = "Path to the data directory",
         .help = "Show help information for the node command",
     };

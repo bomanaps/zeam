@@ -63,8 +63,9 @@ const GenesisConfigError = error{
 /// Required fields:
 /// - `GENESIS_TIME`: integer >= 0
 /// - `GENESIS_VALIDATORS`: list of 52-byte public keys encoded as 104-char hex strings
+///   (legacy configs using `genesis_validators` are still accepted)
 ///
-/// Returns `GenesisSpec` populated with the provided genesis time (optionally overridden) and validator pubkeys.
+/// Returns `GenesisSpec` with genesis time and validator pubkeys.
 /// Errors: `InvalidYamlShape`, `MissingGenesisTime`, `InvalidGenesisTime`, `MissingValidatorConfig`, `InvalidValidatorPubkeys`.
 pub fn genesisConfigFromYAML(
     allocator: Allocator,
@@ -85,7 +86,7 @@ pub fn genesisConfigFromYAML(
     };
     if (override_genesis_time) |override| genesis_time = override;
 
-    const pubkeys_node = root.get("GENESIS_VALIDATORS") orelse return GenesisConfigError.MissingValidatorConfig;
+    const pubkeys_node = root.get("GENESIS_VALIDATORS") orelse root.get("genesis_validators") orelse return GenesisConfigError.MissingValidatorConfig;
     const pubkeys = try parsePubkeysFromYaml(allocator, pubkeys_node);
     return types.GenesisSpec{
         .genesis_time = genesis_time,
