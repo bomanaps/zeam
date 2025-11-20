@@ -6,6 +6,7 @@ const Yaml = @import("yaml").Yaml;
 const configs = @import("@zeam/configs");
 const api = @import("@zeam/api");
 const api_server = @import("api_server.zig");
+const event_broadcaster = api.event_broadcaster;
 const ChainConfig = configs.ChainConfig;
 const Chain = configs.Chain;
 const ChainOptions = configs.ChainOptions;
@@ -101,6 +102,9 @@ pub const Node = struct {
         self.allocator = allocator;
         self.options = options;
 
+        // Initialize event broadcaster
+        try event_broadcaster.initGlobalBroadcaster(allocator);
+
         if (options.metrics_enable) {
             try api.init(allocator);
             try api_server.startAPIServer(allocator, options.metrics_port);
@@ -176,6 +180,7 @@ pub const Node = struct {
         self.enr.deinit();
         self.db.deinit();
         self.loop.deinit();
+        event_broadcaster.deinitGlobalBroadcaster();
     }
 
     pub fn run(self: *Node) !void {
