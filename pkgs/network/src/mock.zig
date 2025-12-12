@@ -7,6 +7,8 @@ const zeam_utils = @import("@zeam/utils");
 
 const interface = @import("./interface.zig");
 const NetworkInterface = interface.NetworkInterface;
+const node_registry = @import("./node_registry.zig");
+const NodeNameRegistry = node_registry.NodeNameRegistry;
 
 pub const Mock = struct {
     allocator: Allocator,
@@ -128,10 +130,10 @@ pub const Mock = struct {
     }
 
     pub fn init(allocator: Allocator, loop: *xev.Loop, logger: zeam_utils.ModuleLogger) !Self {
-        const gossip_handler = try interface.GenericGossipHandler.init(allocator, loop, 0, logger);
+        const gossip_handler = try interface.GenericGossipHandler.init(allocator, loop, 0, logger, null);
         errdefer gossip_handler.deinit();
 
-        const peer_event_handler = try interface.PeerEventHandler.init(allocator, 0, logger);
+        const peer_event_handler = try interface.PeerEventHandler.init(allocator, 0, logger, null);
         errdefer peer_event_handler.deinit();
 
         const timer = try xev.Timer.init();

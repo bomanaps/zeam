@@ -16,6 +16,8 @@ const interface = @import("./interface.zig");
 const NetworkInterface = interface.NetworkInterface;
 const snappyz = @import("snappyz");
 const snappyframesz = @import("snappyframesz");
+const node_registry = @import("./node_registry.zig");
+const NodeNameRegistry = node_registry.NodeNameRegistry;
 
 const ServerStreamError = error{
     StreamAlreadyFinished,
@@ -139,9 +141,10 @@ fn serverStreamSendResponse(ptr: *anyopaque, response: *const interface.ReqRespR
     const allocator = ctx.zigHandler.allocator;
     const response_method = std.meta.activeTag(response.*);
     const response_method_name = @tagName(response_method);
+    const node_name = if (ctx.zigHandler.node_registry) |registry| registry.getNodeNameFromPeerId(ctx.peer_id) else zeam_utils.OptionalNode.init(null);
     ctx.zigHandler.logger.debug(
-        "network-{d}:: serverStreamSendResponse ctx.method={s} response.tag={s}",
-        .{ ctx.zigHandler.params.networkId, @tagName(ctx.method), @tagName(response_method) },
+        "network-{d}:: serverStreamSendResponse ctx.method={s} response.tag={s} peer={s}{}",
+        .{ ctx.zigHandler.params.networkId, @tagName(ctx.method), @tagName(response_method), ctx.peer_id, node_name },
     );
 
     if (ctx.method != response_method) {
@@ -151,11 +154,10 @@ fn serverStreamSendResponse(ptr: *anyopaque, response: *const interface.ReqRespR
         );
         return ServerStreamError.InvalidResponseVariant;
     }
-
     const encoded = response.serialize(allocator) catch |err| {
         ctx.zigHandler.logger.err(
-            "network-{d}:: Failed to serialize {s} response for peer={s} channel={d}: {any}",
-            .{ ctx.zigHandler.params.networkId, response_method_name, ctx.peer_id, ctx.channel_id, err },
+            "network-{d}:: Failed to serialize {s} response for peer={s}{} channel={d}: {any}",
+            .{ ctx.zigHandler.params.networkId, response_method_name, ctx.peer_id, node_name, ctx.channel_id, err },
         );
         return err;
     };
@@ -163,8 +165,8 @@ fn serverStreamSendResponse(ptr: *anyopaque, response: *const interface.ReqRespR
 
     const framed = snappyframesz.encode(allocator, encoded) catch |err| {
         ctx.zigHandler.logger.err(
-            "network-{d}:: Failed to snappy-frame {s} response for peer={s} channel={d}: {any}",
-            .{ ctx.zigHandler.params.networkId, response_method_name, ctx.peer_id, ctx.channel_id, err },
+            "network-{d}:: Failed to snappy-frame {s} response for peer={s}{} channel={d}: {any}",
+            .{ ctx.zigHandler.params.networkId, response_method_name, ctx.peer_id, node_name, ctx.channel_id, err },
         );
         return err;
     };
@@ -174,8 +176,8 @@ fn serverStreamSendResponse(ptr: *anyopaque, response: *const interface.ReqRespR
     defer allocator.free(frame);
 
     ctx.zigHandler.logger.debug(
-        "network-{d}:: Streaming {s} response to peer={s} channel={d}",
-        .{ ctx.zigHandler.params.networkId, response_method_name, ctx.peer_id, ctx.channel_id },
+        "network-{d}:: Streaming {s} response to peer={s}{} channel={d}",
+        .{ ctx.zigHandler.params.networkId, response_method_name, ctx.peer_id, node_name, ctx.channel_id },
     );
 
     send_rpc_response_chunk(
@@ -196,9 +198,10 @@ fn serverStreamSendError(ptr: *anyopaque, code: u32, message: []const u8) anyerr
     const owned_message = try allocator.dupeZ(u8, message);
     defer allocator.free(owned_message);
 
+    const node_name = if (ctx.zigHandler.node_registry) |registry| registry.getNodeNameFromPeerId(ctx.peer_id) else zeam_utils.OptionalNode.init(null);
     ctx.zigHandler.logger.warn(
-        "network-{d}:: Streaming RPC error to peer={s} channel={d} code={d}: {s}",
-        .{ ctx.zigHandler.params.networkId, ctx.peer_id, ctx.channel_id, code, message },
+        "network-{d}:: Streaming RPC error to peer={s}{} channel={d} code={d}: {s}",
+        .{ ctx.zigHandler.params.networkId, ctx.peer_id, node_name, ctx.channel_id, code, message },
     );
 
     send_rpc_error_response(
@@ -317,11 +320,12 @@ export fn handleMsgFromRustBridge(zigHandler: *EthLibp2p, topic_str: [*:0]const 
     defer zigHandler.allocator.free(message_str);
 
     const sender_peer_id_slice = std.mem.span(sender_peer_id);
-    zigHandler.logger.debug("\network-{d}:: !!!handleMsgFromRustBridge topic={s}:: message={s} from bytes={any} sender_peer_id={s}\n", .{ zigHandler.params.networkId, std.mem.span(topic_str), message_str, message_bytes, sender_peer_id_slice });
+    const node_name = if (zigHandler.node_registry) |registry| registry.getNodeNameFromPeerId(sender_peer_id_slice) else zeam_utils.OptionalNode.init(null);
+    zigHandler.logger.debug("\network-{d}:: !!!handleMsgFromRustBridge topic={s}:: message={s} from bytes={any} sender_peer_id={s}{}\n", .{ zigHandler.params.networkId, std.mem.span(topic_str), message_str, message_bytes, sender_peer_id_slice, node_name });
 
     // TODO: figure out why scheduling on the loop is not working
     zigHandler.gossipHandler.onGossip(&message, sender_peer_id_slice, false) catch |e| {
-        zigHandler.logger.err("onGossip handling of message failed with error e={any} from sender_peer_id={s}", .{ e, sender_peer_id_slice });
+        zigHandler.logger.err("onGossip handling of message failed with error e={any} from sender_peer_id={s}{}", .{ e, sender_peer_id_slice, node_name });
     };
 }
 
@@ -336,10 +340,11 @@ export fn handleRPCRequestFromRustBridge(
     const peer_id_slice = std.mem.span(peer_id);
     const protocol_slice = std.mem.span(protocol_id);
 
+    const node_name = if (zigHandler.node_registry) |registry| registry.getNodeNameFromPeerId(peer_id_slice) else zeam_utils.OptionalNode.init(null);
     const rpc_protocol = LeanSupportedProtocol.fromSlice(protocol_slice) orelse {
         zigHandler.logger.warn(
-            "network-{d}:: Unsupported RPC protocol from peer={s} on channel={d}: {s}",
-            .{ zigHandler.params.networkId, peer_id_slice, channel_id, protocol_slice },
+            "network-{d}:: Unsupported RPC protocol from peer={s}{} on channel={d}: {s}",
+            .{ zigHandler.params.networkId, peer_id_slice, node_name, channel_id, protocol_slice },
         );
         return;
     };
@@ -347,16 +352,15 @@ export fn handleRPCRequestFromRustBridge(
     const request_frame: []const u8 = request_ptr[0..request_len];
     const request_payload = parseRequestFrame(request_frame) catch |err| {
         zigHandler.logger.err(
-            "network-{d}:: Invalid RPC request frame from peer={s} protocol={s}: {any}",
-            .{ zigHandler.params.networkId, peer_id_slice, protocol_slice, err },
+            "network-{d}:: Invalid RPC request frame from peer={s}{} protocol={s}: {any}",
+            .{ zigHandler.params.networkId, peer_id_slice, node_name, protocol_slice, err },
         );
         return;
     };
-
     const request_bytes = snappyframesz.decode(zigHandler.allocator, request_payload) catch |err| {
         zigHandler.logger.err(
-            "network-{d}:: Failed to decode snappy-framed RPC request from peer={s} protocol={s}: {any}",
-            .{ zigHandler.params.networkId, peer_id_slice, protocol_slice, err },
+            "network-{d}:: Failed to decode snappy-framed RPC request from peer={s}{} protocol={s}: {any}",
+            .{ zigHandler.params.networkId, peer_id_slice, node_name, protocol_slice, err },
         );
         return;
     };
@@ -385,8 +389,8 @@ export fn handleRPCRequestFromRustBridge(
     defer zigHandler.allocator.free(request_str);
 
     zigHandler.logger.debug(
-        "network-{d}:: !!!handleRPCRequestFromRustBridge peer={s} protocol={s} channel={d}:: request={s}",
-        .{ zigHandler.params.networkId, peer_id_slice, rpc_protocol.protocolId(), channel_id, request_str },
+        "network-{d}:: !!!handleRPCRequestFromRustBridge peer={s}{} protocol={s} channel={d}:: request={s}",
+        .{ zigHandler.params.networkId, peer_id_slice, node_name, rpc_protocol.protocolId(), channel_id, request_str },
     );
 
     const request_method = std.meta.activeTag(request);
@@ -408,8 +412,8 @@ export fn handleRPCRequestFromRustBridge(
 
     zigHandler.reqrespHandler.onReqRespRequest(&request, stream) catch |e| {
         zigHandler.logger.err(
-            "network-{d}:: Error while handling RPC request from peer={s} on channel={d}: {any}",
-            .{ zigHandler.params.networkId, peer_id_slice, channel_id, e },
+            "network-{d}:: Error while handling RPC request from peer={s}{} on channel={d}: {any}",
+            .{ zigHandler.params.networkId, peer_id_slice, node_name, channel_id, e },
         );
 
         if (!stream.isFinished()) {
@@ -418,15 +422,15 @@ export fn handleRPCRequestFromRustBridge(
                 defer zigHandler.allocator.free(owned);
                 stream.sendError(1, owned) catch |send_err| {
                     zigHandler.logger.err(
-                        "network-{d}:: Failed to send RPC error response for peer={s} channel={d}: {any}",
-                        .{ zigHandler.params.networkId, peer_id_slice, channel_id, send_err },
+                        "network-{d}:: Failed to send RPC error response for peer={s}{} channel={d}: {any}",
+                        .{ zigHandler.params.networkId, peer_id_slice, node_name, channel_id, send_err },
                     );
                 };
             } else {
                 stream.finish() catch |finish_err| {
                     zigHandler.logger.err(
-                        "network-{d}:: Failed to finalize errored RPC stream for peer={s} channel={d}: {any}",
-                        .{ zigHandler.params.networkId, peer_id_slice, channel_id, finish_err },
+                        "network-{d}:: Failed to finalize errored RPC stream for peer={s}{} channel={d}: {any}",
+                        .{ zigHandler.params.networkId, peer_id_slice, node_name, channel_id, finish_err },
                     );
                 };
             }
@@ -437,8 +441,8 @@ export fn handleRPCRequestFromRustBridge(
     if (!stream.isFinished()) {
         stream.finish() catch |finish_err| {
             zigHandler.logger.err(
-                "network-{d}:: Failed to finalize RPC stream for peer={s} channel={d}: {any}",
-                .{ zigHandler.params.networkId, peer_id_slice, channel_id, finish_err },
+                "network-{d}:: Failed to finalize RPC stream for peer={s}{} channel={d}: {any}",
+                .{ zigHandler.params.networkId, peer_id_slice, node_name, channel_id, finish_err },
             );
         };
     }
@@ -647,7 +651,8 @@ export fn handleRPCErrorFromRustBridge(
 
 export fn handlePeerConnectedFromRustBridge(zigHandler: *EthLibp2p, peer_id: [*:0]const u8) void {
     const peer_id_slice = std.mem.span(peer_id);
-    zigHandler.logger.info("network-{d}:: Peer connected: {s}", .{ zigHandler.params.networkId, peer_id_slice });
+    const node_name = if (zigHandler.node_registry) |registry| registry.getNodeNameFromPeerId(peer_id_slice) else zeam_utils.OptionalNode.init(null);
+    zigHandler.logger.info("network-{d}:: Peer connected: {s}{}", .{ zigHandler.params.networkId, peer_id_slice, node_name });
 
     zigHandler.peerEventHandler.onPeerConnected(peer_id_slice) catch |e| {
         zigHandler.logger.err("network-{d}:: Error handling peer connected event: {any}", .{ zigHandler.params.networkId, e });
@@ -656,7 +661,8 @@ export fn handlePeerConnectedFromRustBridge(zigHandler: *EthLibp2p, peer_id: [*:
 
 export fn handlePeerDisconnectedFromRustBridge(zigHandler: *EthLibp2p, peer_id: [*:0]const u8) void {
     const peer_id_slice = std.mem.span(peer_id);
-    zigHandler.logger.info("network-{d}:: Peer disconnected: {s}", .{ zigHandler.params.networkId, peer_id_slice });
+    const node_name = if (zigHandler.node_registry) |registry| registry.getNodeNameFromPeerId(peer_id_slice) else zeam_utils.OptionalNode.init(null);
+    zigHandler.logger.info("network-{d}:: Peer disconnected: {s}{}", .{ zigHandler.params.networkId, peer_id_slice, node_name });
 
     zigHandler.peerEventHandler.onPeerDisconnected(peer_id_slice) catch |e| {
         zigHandler.logger.err("network-{d}:: Error handling peer disconnected event: {any}", .{ zigHandler.params.networkId, e });
@@ -739,6 +745,7 @@ pub const EthLibp2pParams = struct {
     local_private_key: []const u8,
     listen_addresses: []const Multiaddr,
     connect_peers: ?[]const Multiaddr,
+    node_registry: ?*const NodeNameRegistry = null,
 };
 
 pub const EthLibp2p = struct {
@@ -750,6 +757,7 @@ pub const EthLibp2p = struct {
     rustBridgeThread: ?Thread = null,
     rpcCallbacks: std.AutoHashMapUnmanaged(u64, interface.ReqRespRequestCallback),
     logger: zeam_utils.ModuleLogger,
+    node_registry: ?*const NodeNameRegistry,
 
     const Self = @This();
 
@@ -762,13 +770,13 @@ pub const EthLibp2p = struct {
         const owned_network_name = try allocator.dupe(u8, params.network_name);
         errdefer allocator.free(owned_network_name);
 
-        const gossip_handler = try interface.GenericGossipHandler.init(allocator, loop, params.networkId, logger);
+        const gossip_handler = try interface.GenericGossipHandler.init(allocator, loop, params.networkId, logger, params.node_registry);
         errdefer gossip_handler.deinit();
 
-        const peer_event_handler = try interface.PeerEventHandler.init(allocator, params.networkId, logger);
+        const peer_event_handler = try interface.PeerEventHandler.init(allocator, params.networkId, logger, params.node_registry);
         errdefer peer_event_handler.deinit();
 
-        const reqresp_handler = try interface.ReqRespRequestHandler.init(allocator, params.networkId, logger);
+        const reqresp_handler = try interface.ReqRespRequestHandler.init(allocator, params.networkId, logger, params.node_registry);
         errdefer reqresp_handler.deinit();
 
         return Self{
@@ -785,6 +793,7 @@ pub const EthLibp2p = struct {
             .reqrespHandler = reqresp_handler,
             .rpcCallbacks = std.AutoHashMapUnmanaged(u64, interface.ReqRespRequestCallback).empty,
             .logger = logger,
+            .node_registry = params.node_registry,
         };
     }
 
@@ -890,10 +899,11 @@ pub const EthLibp2p = struct {
         const method = std.meta.activeTag(req.*);
         const protocol_tag: u32 = @as(u32, @intFromEnum(method));
 
+        const node_name = if (self.node_registry) |registry| registry.getNodeNameFromPeerId(peer_id) else zeam_utils.OptionalNode.init(null);
         const encoded_message = req.serialize(self.allocator) catch |err| {
             self.logger.err(
-                "network-{d}:: Failed to serialize RPC request for peer={s} method={s}: {any}",
-                .{ self.params.networkId, peer_id, @tagName(method), err },
+                "network-{d}:: Failed to serialize RPC request for peer={s}{} method={s}: {any}",
+                .{ self.params.networkId, peer_id, node_name, @tagName(method), err },
             );
             return err;
         };
@@ -902,17 +912,16 @@ pub const EthLibp2p = struct {
 
         const framed_payload = snappyframesz.encode(self.allocator, encoded_message) catch |err| {
             self.logger.err(
-                "network-{d}:: Failed to snappy-frame RPC request payload for peer={s} protocol_tag={d}: {any}",
-                .{ self.params.networkId, peer_id, protocol_tag, err },
+                "network-{d}:: Failed to snappy-frame RPC request payload for peer={s}{} protocol_tag={d}: {any}",
+                .{ self.params.networkId, peer_id, node_name, protocol_tag, err },
             );
             return err;
         };
         defer self.allocator.free(framed_payload);
-
         const frame = buildRequestFrame(self.allocator, framed_payload) catch |err| {
             self.logger.err(
-                "network-{d}:: Failed to build RPC request frame for peer={s} protocol_tag={d}: {any}",
-                .{ self.params.networkId, peer_id, protocol_tag, err },
+                "network-{d}:: Failed to build RPC request frame for peer={s}{} protocol_tag={d}: {any}",
+                .{ self.params.networkId, peer_id, node_name, protocol_tag, err },
             );
             return err;
         };
@@ -936,8 +945,8 @@ pub const EthLibp2p = struct {
 
             self.rpcCallbacks.put(self.allocator, request_id, callback_entry) catch |err| {
                 self.logger.err(
-                    "network-{d}:: Failed to register RPC callback for request_id={d} peer={s}: {any}",
-                    .{ self.params.networkId, request_id, peer_id, err },
+                    "network-{d}:: Failed to register RPC callback for request_id={d} peer={s}{}: {any}",
+                    .{ self.params.networkId, request_id, peer_id, node_name, err },
                 );
                 return err;
             };

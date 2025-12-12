@@ -16,12 +16,11 @@ const OnIntervalCbWrapper = utils.OnIntervalCbWrapper;
 pub const chainFactory = @import("./chain.zig");
 pub const clockFactory = @import("./clock.zig");
 pub const networkFactory = @import("./network.zig");
-pub const node_registry = @import("./node_registry.zig");
 pub const validatorClient = @import("./validator_client.zig");
 const constants = @import("./constants.zig");
 
 const BlockByRootContext = networkFactory.BlockByRootContext;
-pub const NodeNameRegistry = node_registry.NodeNameRegistry;
+pub const NodeNameRegistry = networks.NodeNameRegistry;
 
 const NodeOpts = struct {
     config: configs.ChainConfig,
@@ -520,9 +519,10 @@ pub const BeamNode = struct {
 
         const message = signed_attestation.message;
         const data = message.data;
-        self.logger.info("Published attestation to network: slot={d} validator={d}", .{
+        self.logger.info("Published attestation to network: slot={d} validator={d}{}", .{
             data.slot,
             message.validator_id,
+            self.node_registry.getNodeNameFromValidatorIndex(message.validator_id),
         });
 
         // 2. Process locally through chain
