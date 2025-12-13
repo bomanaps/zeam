@@ -141,7 +141,7 @@ fn serverStreamSendResponse(ptr: *anyopaque, response: *const interface.ReqRespR
     const allocator = ctx.zigHandler.allocator;
     const response_method = std.meta.activeTag(response.*);
     const response_method_name = @tagName(response_method);
-    const node_name = if (ctx.zigHandler.node_registry) |registry| registry.getNodeNameFromPeerId(ctx.peer_id) else zeam_utils.OptionalNode.init(null);
+    const node_name = ctx.zigHandler.node_registry.getNodeNameFromPeerId(ctx.peer_id);
     ctx.zigHandler.logger.debug(
         "network-{d}:: serverStreamSendResponse ctx.method={s} response.tag={s} peer={s}{}",
         .{ ctx.zigHandler.params.networkId, @tagName(ctx.method), @tagName(response_method), ctx.peer_id, node_name },
@@ -198,7 +198,7 @@ fn serverStreamSendError(ptr: *anyopaque, code: u32, message: []const u8) anyerr
     const owned_message = try allocator.dupeZ(u8, message);
     defer allocator.free(owned_message);
 
-    const node_name = if (ctx.zigHandler.node_registry) |registry| registry.getNodeNameFromPeerId(ctx.peer_id) else zeam_utils.OptionalNode.init(null);
+    const node_name = ctx.zigHandler.node_registry.getNodeNameFromPeerId(ctx.peer_id);
     ctx.zigHandler.logger.warn(
         "network-{d}:: Streaming RPC error to peer={s}{} channel={d} code={d}: {s}",
         .{ ctx.zigHandler.params.networkId, ctx.peer_id, node_name, ctx.channel_id, code, message },
@@ -320,7 +320,7 @@ export fn handleMsgFromRustBridge(zigHandler: *EthLibp2p, topic_str: [*:0]const 
     defer zigHandler.allocator.free(message_str);
 
     const sender_peer_id_slice = std.mem.span(sender_peer_id);
-    const node_name = if (zigHandler.node_registry) |registry| registry.getNodeNameFromPeerId(sender_peer_id_slice) else zeam_utils.OptionalNode.init(null);
+    const node_name = zigHandler.node_registry.getNodeNameFromPeerId(sender_peer_id_slice);
     zigHandler.logger.debug("\network-{d}:: !!!handleMsgFromRustBridge topic={s}:: message={s} from bytes={any} sender_peer_id={s}{}\n", .{ zigHandler.params.networkId, std.mem.span(topic_str), message_str, message_bytes, sender_peer_id_slice, node_name });
 
     // TODO: figure out why scheduling on the loop is not working
@@ -340,7 +340,7 @@ export fn handleRPCRequestFromRustBridge(
     const peer_id_slice = std.mem.span(peer_id);
     const protocol_slice = std.mem.span(protocol_id);
 
-    const node_name = if (zigHandler.node_registry) |registry| registry.getNodeNameFromPeerId(peer_id_slice) else zeam_utils.OptionalNode.init(null);
+    const node_name = zigHandler.node_registry.getNodeNameFromPeerId(peer_id_slice);
     const rpc_protocol = LeanSupportedProtocol.fromSlice(protocol_slice) orelse {
         zigHandler.logger.warn(
             "network-{d}:: Unsupported RPC protocol from peer={s}{} on channel={d}: {s}",
@@ -651,7 +651,7 @@ export fn handleRPCErrorFromRustBridge(
 
 export fn handlePeerConnectedFromRustBridge(zigHandler: *EthLibp2p, peer_id: [*:0]const u8) void {
     const peer_id_slice = std.mem.span(peer_id);
-    const node_name = if (zigHandler.node_registry) |registry| registry.getNodeNameFromPeerId(peer_id_slice) else zeam_utils.OptionalNode.init(null);
+    const node_name = zigHandler.node_registry.getNodeNameFromPeerId(peer_id_slice);
     zigHandler.logger.info("network-{d}:: Peer connected: {s}{}", .{ zigHandler.params.networkId, peer_id_slice, node_name });
 
     zigHandler.peerEventHandler.onPeerConnected(peer_id_slice) catch |e| {
@@ -661,7 +661,7 @@ export fn handlePeerConnectedFromRustBridge(zigHandler: *EthLibp2p, peer_id: [*:
 
 export fn handlePeerDisconnectedFromRustBridge(zigHandler: *EthLibp2p, peer_id: [*:0]const u8) void {
     const peer_id_slice = std.mem.span(peer_id);
-    const node_name = if (zigHandler.node_registry) |registry| registry.getNodeNameFromPeerId(peer_id_slice) else zeam_utils.OptionalNode.init(null);
+    const node_name = zigHandler.node_registry.getNodeNameFromPeerId(peer_id_slice);
     zigHandler.logger.info("network-{d}:: Peer disconnected: {s}{}", .{ zigHandler.params.networkId, peer_id_slice, node_name });
 
     zigHandler.peerEventHandler.onPeerDisconnected(peer_id_slice) catch |e| {
@@ -745,7 +745,7 @@ pub const EthLibp2pParams = struct {
     local_private_key: []const u8,
     listen_addresses: []const Multiaddr,
     connect_peers: ?[]const Multiaddr,
-    node_registry: ?*const NodeNameRegistry = null,
+    node_registry: *const NodeNameRegistry,
 };
 
 pub const EthLibp2p = struct {
@@ -757,7 +757,7 @@ pub const EthLibp2p = struct {
     rustBridgeThread: ?Thread = null,
     rpcCallbacks: std.AutoHashMapUnmanaged(u64, interface.ReqRespRequestCallback),
     logger: zeam_utils.ModuleLogger,
-    node_registry: ?*const NodeNameRegistry,
+    node_registry: *const NodeNameRegistry,
 
     const Self = @This();
 
@@ -787,6 +787,7 @@ pub const EthLibp2p = struct {
                 .local_private_key = params.local_private_key,
                 .listen_addresses = params.listen_addresses,
                 .connect_peers = params.connect_peers,
+                .node_registry = params.node_registry,
             },
             .gossipHandler = gossip_handler,
             .peerEventHandler = peer_event_handler,
@@ -899,7 +900,7 @@ pub const EthLibp2p = struct {
         const method = std.meta.activeTag(req.*);
         const protocol_tag: u32 = @as(u32, @intFromEnum(method));
 
-        const node_name = if (self.node_registry) |registry| registry.getNodeNameFromPeerId(peer_id) else zeam_utils.OptionalNode.init(null);
+        const node_name = self.node_registry.getNodeNameFromPeerId(peer_id);
         const encoded_message = req.serialize(self.allocator) catch |err| {
             self.logger.err(
                 "network-{d}:: Failed to serialize RPC request for peer={s}{} method={s}: {any}",

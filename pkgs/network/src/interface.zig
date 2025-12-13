@@ -524,11 +524,11 @@ pub const ReqRespRequestHandler = struct {
     handlers: std.ArrayListUnmanaged(OnReqRespRequestCbHandler),
     networkId: u32,
     logger: zeam_utils.ModuleLogger,
-    node_registry: ?*const NodeNameRegistry,
+    node_registry: *const NodeNameRegistry,
 
     const Self = @This();
 
-    pub fn init(allocator: Allocator, networkId: u32, logger: zeam_utils.ModuleLogger, registry: ?*const NodeNameRegistry) !Self {
+    pub fn init(allocator: Allocator, networkId: u32, logger: zeam_utils.ModuleLogger, registry: *const NodeNameRegistry) !Self {
         return Self{
             .allocator = allocator,
             .handlers = .empty,
@@ -628,11 +628,11 @@ pub const PeerEventHandler = struct {
     handlers: std.ArrayListUnmanaged(OnPeerEventCbHandler),
     networkId: u32,
     logger: zeam_utils.ModuleLogger,
-    node_registry: ?*const NodeNameRegistry,
+    node_registry: *const NodeNameRegistry,
 
     const Self = @This();
 
-    pub fn init(allocator: Allocator, networkId: u32, logger: zeam_utils.ModuleLogger, registry: ?*const NodeNameRegistry) !Self {
+    pub fn init(allocator: Allocator, networkId: u32, logger: zeam_utils.ModuleLogger, registry: *const NodeNameRegistry) !Self {
         return Self{
             .allocator = allocator,
             .handlers = .empty,
@@ -651,7 +651,7 @@ pub const PeerEventHandler = struct {
     }
 
     pub fn onPeerConnected(self: *Self, peer_id: []const u8) anyerror!void {
-        const node_name = if (self.node_registry) |registry| registry.getNodeNameFromPeerId(peer_id) else zeam_utils.OptionalNode.init(null);
+        const node_name = self.node_registry.getNodeNameFromPeerId(peer_id);
         self.logger.debug("network-{d}:: PeerEventHandler.onPeerConnected peer_id={s}{}, handlers={d}", .{ self.networkId, peer_id, node_name, self.handlers.items.len });
         for (self.handlers.items) |handler| {
             handler.onPeerConnected(peer_id) catch |e| {
@@ -661,7 +661,7 @@ pub const PeerEventHandler = struct {
     }
 
     pub fn onPeerDisconnected(self: *Self, peer_id: []const u8) anyerror!void {
-        const node_name = if (self.node_registry) |registry| registry.getNodeNameFromPeerId(peer_id) else zeam_utils.OptionalNode.init(null);
+        const node_name = self.node_registry.getNodeNameFromPeerId(peer_id);
         self.logger.debug("network-{d}:: PeerEventHandler.onPeerDisconnected peer_id={s}{}, handlers={d}", .{ self.networkId, peer_id, node_name, self.handlers.items.len });
         for (self.handlers.items) |handler| {
             handler.onPeerDisconnected(peer_id) catch |e| {
@@ -678,10 +678,10 @@ pub const GenericGossipHandler = struct {
     onGossipHandlers: std.AutoHashMapUnmanaged(GossipTopic, std.ArrayListUnmanaged(OnGossipCbHandler)),
     networkId: u32,
     logger: zeam_utils.ModuleLogger,
-    node_registry: ?*const NodeNameRegistry,
+    node_registry: *const NodeNameRegistry,
 
     const Self = @This();
-    pub fn init(allocator: Allocator, loop: *xev.Loop, networkId: u32, logger: zeam_utils.ModuleLogger, registry: ?*const NodeNameRegistry) !Self {
+    pub fn init(allocator: Allocator, loop: *xev.Loop, networkId: u32, logger: zeam_utils.ModuleLogger, registry: *const NodeNameRegistry) !Self {
         const timer = try xev.Timer.init();
         errdefer timer.deinit();
 
@@ -724,7 +724,7 @@ pub const GenericGossipHandler = struct {
     pub fn onGossip(self: *Self, data: *const GossipMessage, sender_peer_id: []const u8, scheduleOnLoop: bool) anyerror!void {
         const gossip_topic = data.getGossipTopic();
         const handlerArr = self.onGossipHandlers.get(gossip_topic).?;
-        const node_name = if (self.node_registry) |registry| registry.getNodeNameFromPeerId(sender_peer_id) else zeam_utils.OptionalNode.init(null);
+        const node_name = self.node_registry.getNodeNameFromPeerId(sender_peer_id);
         self.logger.debug("network-{d}:: ongossip handlerArr {any} for topic {any} from peer={s}{}", .{ self.networkId, handlerArr.items, gossip_topic, sender_peer_id, node_name });
         for (handlerArr.items) |handler| {
 

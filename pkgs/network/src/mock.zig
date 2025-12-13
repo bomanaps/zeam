@@ -15,6 +15,7 @@ pub const Mock = struct {
     logger: zeam_utils.ModuleLogger,
     gossipHandler: interface.GenericGossipHandler,
     peerEventHandler: interface.PeerEventHandler,
+    empty_registry: *NodeNameRegistry,
 
     rpcCallbacks: std.AutoHashMapUnmanaged(u64, interface.ReqRespRequestCallback),
     peerLookup: std.StringHashMapUnmanaged(usize),
@@ -130,10 +131,15 @@ pub const Mock = struct {
     }
 
     pub fn init(allocator: Allocator, loop: *xev.Loop, logger: zeam_utils.ModuleLogger) !Self {
-        const gossip_handler = try interface.GenericGossipHandler.init(allocator, loop, 0, logger, null);
+        // Create empty registry for Mock network (test scenarios don't need real node names)
+        const empty_registry = try allocator.create(NodeNameRegistry);
+        empty_registry.* = NodeNameRegistry.init(allocator);
+        errdefer allocator.destroy(empty_registry);
+
+        const gossip_handler = try interface.GenericGossipHandler.init(allocator, loop, 0, logger, empty_registry);
         errdefer gossip_handler.deinit();
 
-        const peer_event_handler = try interface.PeerEventHandler.init(allocator, 0, logger, null);
+        const peer_event_handler = try interface.PeerEventHandler.init(allocator, 0, logger, empty_registry);
         errdefer peer_event_handler.deinit();
 
         const timer = try xev.Timer.init();
@@ -144,6 +150,7 @@ pub const Mock = struct {
             .logger = logger,
             .gossipHandler = gossip_handler,
             .peerEventHandler = peer_event_handler,
+            .empty_registry = empty_registry,
             .rpcCallbacks = .empty,
             .peerLookup = .empty,
             .ownerToPeer = .empty,
@@ -184,6 +191,8 @@ pub const Mock = struct {
 
         self.gossipHandler.deinit();
         self.peerEventHandler.deinit();
+        self.empty_registry.deinit();
+        self.allocator.destroy(self.empty_registry);
     }
 
     fn allocateRequestId(self: *Self) u64 {
