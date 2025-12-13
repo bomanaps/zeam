@@ -55,8 +55,14 @@ pub const Mock = struct {
         mock: *Mock,
         request_id: u64,
         method: interface.LeanSupportedProtocol,
+        sender_peer_id: []const u8,
         finished: bool = false,
     };
+
+    fn mockStreamGetPeerId(ptr: *anyopaque) ?[]const u8 {
+        const ctx: *MockServerStream = @ptrCast(@alignCast(ptr));
+        return ctx.sender_peer_id;
+    }
 
     const SyntheticResponseTask = struct {
         mock: *Mock,
@@ -439,7 +445,18 @@ pub const Mock = struct {
     pub fn publish(ptr: *anyopaque, data: *const interface.GossipMessage) anyerror!void {
         // TODO: prevent from publishing to self handler
         const self: *Self = @ptrCast(@alignCast(ptr));
-        return self.gossipHandler.onGossip(data, "unknown_peer_id", true);
+        // Try to find a valid peer_id from connected peers, otherwise use a default
+        const sender_peer_id = blk: {
+            // Find first peer with a valid peer_id
+            for (self.peers.items) |peer| {
+                if (peer.peer_id) |pid| {
+                    break :blk pid;
+                }
+            }
+            // Fallback to default if no peers found
+            break :blk "mock_publisher";
+        };
+        return self.gossipHandler.onGossip(data, sender_peer_id, true);
     }
 
     pub fn subscribe(ptr: *anyopaque, topics: []interface.GossipTopic, handler: interface.OnGossipCbHandler) anyerror!void {
@@ -471,7 +488,9 @@ pub const Mock = struct {
             }
         }
 
-        const callback_entry = interface.ReqRespRequestCallback.init(method, self.allocator, callback);
+        const peer_id_copy = try self.allocator.dupe(u8, peer_id);
+        errdefer self.allocator.free(peer_id_copy);
+        const callback_entry = interface.ReqRespRequestCallback.init(method, self.allocator, callback, peer_id_copy);
         try self.rpcCallbacks.put(self.allocator, request_id, callback_entry);
 
         if (target_peer.req_handler) |handler| {
@@ -480,6 +499,7 @@ pub const Mock = struct {
                 .mock = self,
                 .request_id = request_id,
                 .method = method,
+                .sender_peer_id = peer_id,
             };
 
             var stream_registered = false;
@@ -494,6 +514,7 @@ pub const Mock = struct {
                 .sendErrorFn = serverStreamSendError,
                 .finishFn = serverStreamFinish,
                 .isFinishedFn = serverStreamIsFinished,
+                .getPeerIdFn = mockStreamGetPeerId,
             };
 
             handler.onReqRespRequest(&request_copy, stream_iface) catch |err| {

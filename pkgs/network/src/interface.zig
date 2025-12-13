@@ -401,6 +401,7 @@ pub const ReqRespServerStream = struct {
     sendErrorFn: *const fn (ptr: *anyopaque, code: u32, message: []const u8) anyerror!void,
     finishFn: *const fn (ptr: *anyopaque) anyerror!void,
     isFinishedFn: *const fn (ptr: *anyopaque) bool,
+    getPeerIdFn: ?*const fn (ptr: *anyopaque) ?[]const u8 = null,
 
     const Self = @This();
 
@@ -420,6 +421,13 @@ pub const ReqRespServerStream = struct {
 
     pub fn isFinished(self: Self) bool {
         return self.isFinishedFn(self.ptr);
+    }
+
+    pub fn getPeerId(self: Self) ?[]const u8 {
+        if (self.getPeerIdFn) |fn_ptr| {
+            return fn_ptr(self.ptr);
+        }
+        return null;
     }
 };
 pub const ReqRespResponseError = struct {
@@ -479,17 +487,20 @@ pub const ReqRespRequestCallback = struct {
     method: LeanSupportedProtocol,
     allocator: Allocator,
     handler: ?OnReqRespResponseCbHandler,
+    peer_id: []const u8,
 
-    pub fn init(method: LeanSupportedProtocol, allocator: Allocator, handler: ?OnReqRespResponseCbHandler) ReqRespRequestCallback {
+    pub fn init(method: LeanSupportedProtocol, allocator: Allocator, handler: ?OnReqRespResponseCbHandler, peer_id: []const u8) ReqRespRequestCallback {
         return ReqRespRequestCallback{
             .method = method,
             .allocator = allocator,
             .handler = handler,
+            .peer_id = peer_id,
         };
     }
 
     pub fn deinit(self: *ReqRespRequestCallback) void {
-        _ = self;
+        // peer_id is owned by the callback, free it
+        self.allocator.free(self.peer_id);
     }
 
     pub fn notify(self: *ReqRespRequestCallback, event: *const ReqRespResponseEvent) anyerror!void {
@@ -547,7 +558,10 @@ pub const ReqRespRequestHandler = struct {
     }
 
     pub fn onReqRespRequest(self: *Self, req: *const ReqRespRequest, stream: ReqRespServerStream) anyerror!void {
-        self.logger.debug("network-{d}:: onReqRespRequest={any}, handlers={d}", .{ self.networkId, req, self.handlers.items.len });
+        const peer_id_opt = stream.getPeerId();
+        const peer_id = peer_id_opt orelse "unknown";
+        const node_name = if (peer_id_opt) |pid| self.node_registry.getNodeNameFromPeerId(pid) else zeam_utils.OptionalNode.init(null);
+        self.logger.debug("network-{d}:: onReqRespRequest={any}, handlers={d} from peer={s}{}", .{ self.networkId, req, self.handlers.items.len, peer_id, node_name });
         if (self.handlers.items.len == 0) {
             return error.NoHandlerSubscribed;
         }
@@ -557,7 +571,7 @@ pub const ReqRespRequestHandler = struct {
 
         for (self.handlers.items) |handler| {
             handler.onReqRespRequest(req, stream) catch |err| {
-                self.logger.err("network-{d}:: onReqRespRequest handler error={any}", .{ self.networkId, err });
+                self.logger.err("network-{d}:: onReqRespRequest handler error={any} from peer={s}{}", .{ self.networkId, err, peer_id, node_name });
                 last_err = err;
                 continue;
             };
