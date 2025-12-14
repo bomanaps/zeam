@@ -1257,9 +1257,11 @@ impl Behaviour {
 
         // build a gossipsub network behaviour with Signed mode to enable source tracking
         // Signed mode allows us to identify the sender peer ID in messages
-        let gossipsub =
-            gossipsub::Behaviour::new(gossipsub::MessageAuthenticity::Signed(key.clone()), gossipsub_config)
-                .unwrap();
+        let gossipsub = gossipsub::Behaviour::new(
+            gossipsub::MessageAuthenticity::Signed(key.clone()),
+            gossipsub_config,
+        )
+        .unwrap();
 
         let reqresp = ReqResp::new(vec![
             LeanSupportedProtocol::StatusV1.into(),
