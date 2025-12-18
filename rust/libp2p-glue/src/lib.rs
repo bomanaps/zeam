@@ -1245,7 +1245,7 @@ impl Behaviour {
             .mesh_n_high(12)
             .gossip_lazy(6)
             .heartbeat_interval(Duration::from_millis(700))
-            .validation_mode(gossipsub::ValidationMode::Permissive)
+            .validation_mode(gossipsub::ValidationMode::Anonymous)
             .history_length(6)
             .duplicate_cache_time(Duration::from_secs(3 * 4 * 2))
             .message_id_fn(message_id_fn) // content-address messages. No two messages of the same content will be propagated.
