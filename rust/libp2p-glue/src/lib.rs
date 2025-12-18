@@ -1253,13 +1253,11 @@ impl Behaviour {
             .unwrap();
         // .map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?; // Temporary hack because `build` does not return a proper `std::error::Error`.
 
-        // build a gossipsub network behaviour with Signed mode to enable source tracking
-        // Signed mode allows us to identify the sender peer ID in messages
-        let gossipsub = gossipsub::Behaviour::new(
-            gossipsub::MessageAuthenticity::Signed(key.clone()),
-            gossipsub_config,
-        )
-        .unwrap();
+        // build a gossipsub network behaviour with Anonymous mode for multi-client compatibility
+        // Anonymous mode ensures interoperability with other clients (ream, lanten, qlean)
+        let gossipsub =
+            gossipsub::Behaviour::new(gossipsub::MessageAuthenticity::Anonymous, gossipsub_config)
+                .unwrap();
 
         let reqresp = ReqResp::new(vec![
             LeanSupportedProtocol::StatusV1.into(),
