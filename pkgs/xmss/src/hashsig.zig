@@ -81,7 +81,49 @@ extern fn hashsig_verify_ssz(
 
 pub const HashSigError = error{ KeyGenerationFailed, SigningFailed, VerificationFailed, InvalidSignature, SerializationFailed, InvalidMessageLength, DeserializationFailed, OutOfMemory };
 
+/// Determine the actual SSZ-encoded length of a signature by finding where trailing zeros start.
+/// Since signatures are padded with zeros to SIGSIZE (3112), we scan backwards to find
+/// the first non-zero byte, which indicates where the actual SSZ-encoded data ends.
+/// Returns the actual encoded length (excluding padding), or the full length if no padding found.
+fn getActualSszSignatureLength(signature_bytes: []const u8) usize {
+    // Scan backwards to find where trailing zeros start
+    // We look for a sequence of at least 32 consecutive zeros (to avoid false positives from
+    // legitimate zero bytes in the signature data)
+    const MIN_PADDING_SIZE: usize = 32;
+
+    if (signature_bytes.len < MIN_PADDING_SIZE) {
+        return signature_bytes.len;
+    }
+
+    var trailing_zeros: usize = 0;
+    var i: usize = signature_bytes.len;
+    while (i > 0) {
+        i -= 1;
+        if (signature_bytes[i] == 0) {
+            trailing_zeros += 1;
+        } else {
+            break;
+        }
+    }
+
+    // If we found significant trailing zeros, return the length without padding
+    if (trailing_zeros >= MIN_PADDING_SIZE) {
+        const actual_length = signature_bytes.len - trailing_zeros;
+        // Ensure minimum valid length (at least 72 bytes for fixed part: path_offset + rho + hashes_offset)
+        const MIN_VALID_LENGTH: usize = 72;
+        if (actual_length < MIN_VALID_LENGTH) {
+            std.log.err("[xmss] getActualSszSignatureLength: calculated actual_length={d} < MIN_VALID_LENGTH={d}, using full length", .{ actual_length, MIN_VALID_LENGTH });
+            return signature_bytes.len;
+        }
+        return actual_length;
+    }
+
+    // No significant padding found, return full length
+    return signature_bytes.len;
+}
+
 /// Verify signature using SSZ-encoded bytes
+/// Automatically detects the actual SSZ-encoded length to handle variable-length signatures correctly.
 pub fn verifySsz(
     pubkey_bytes: []const u8,
     message: []const u8,
@@ -92,13 +134,18 @@ pub fn verifySsz(
         return HashSigError.InvalidMessageLength;
     }
 
+    // Detect actual SSZ-encoded length by scanning for trailing zero-padding
+    // This aligns with the spec's variable-length SSZ encoding and handles
+    // cases where signature_bytes may be padded with zeros
+    const actual_length = getActualSszSignatureLength(signature_bytes);
+
     const result = hashsig_verify_ssz(
         pubkey_bytes.ptr,
         pubkey_bytes.len,
         message.ptr,
         epoch,
         signature_bytes.ptr,
-        signature_bytes.len,
+        actual_length,
     );
 
     switch (result) {
@@ -308,7 +355,7 @@ test "HashSig: SSZ keypair roundtrip" {
     defer allocator.free(sk_buffer);
     const sk_len = try keypair.privkeyToBytes(sk_buffer);
 
-    std.debug.print("\nPK size: {d}, SK size: {d}\n", .{ pk_len, sk_len });
+    std.debug.print("\nPK size: {d}, SK size: {d}\n\n", .{ pk_len, sk_len });
 
     // Reconstruct from SSZ
     var restored_keypair = try KeyPair.fromSsz(
@@ -399,12 +446,12 @@ test "HashSig: SSZ serialize and verify" {
     // Serialize signature
     var sig_buffer: [4000]u8 = undefined;
     const sig_size = try signature.toBytes(&sig_buffer);
-    std.debug.print("\nSignature size: {d} bytes\n", .{sig_size});
+    std.debug.print("\nSignature size: {d} bytes\n\n", .{sig_size});
 
     // Serialize public key
     var pubkey_buffer: [256]u8 = undefined;
     const pubkey_size = try keypair.pubkeyToBytes(&pubkey_buffer);
-    std.debug.print("Public key size: {d} bytes\n", .{pubkey_size});
+    std.debug.print("Public key size: {d} bytes\n\n", .{pubkey_size});
 
     // Verify using SSZ
     try verifySsz(
@@ -414,7 +461,7 @@ test "HashSig: SSZ serialize and verify" {
         sig_buffer[0..sig_size],
     );
 
-    std.debug.print("Verification succeeded!\n", .{});
+    std.debug.print("Verification succeeded!\n\n", .{});
 }
 
 test "HashSig: verify fails with zero signature" {
