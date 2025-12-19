@@ -112,7 +112,6 @@ fn getActualSszSignatureLength(signature_bytes: []const u8) usize {
         // Ensure minimum valid length (at least 72 bytes for fixed part: path_offset + rho + hashes_offset)
         const MIN_VALID_LENGTH: usize = 72;
         if (actual_length < MIN_VALID_LENGTH) {
-            std.log.err("[xmss] getActualSszSignatureLength: calculated actual_length={d} < MIN_VALID_LENGTH={d}, using full length", .{ actual_length, MIN_VALID_LENGTH });
             return signature_bytes.len;
         }
         return actual_length;
