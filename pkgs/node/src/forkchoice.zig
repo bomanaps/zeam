@@ -1008,25 +1008,25 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
     var proto_array = try ProtoArray.init(allocator, anchor_block);
 
     // Canonical chain with missed slots
-    try proto_array.onBlock(createTestProtoBlock(1, 0xBB, 0xAA), 1);  // B: slot 1
-    try proto_array.onBlock(createTestProtoBlock(3, 0xCC, 0xBB), 3);  // C: slot 3 (missed slot 2)
-    try proto_array.onBlock(createTestProtoBlock(5, 0xDD, 0xCC), 5);  // D: slot 5 (missed slot 4)
-    try proto_array.onBlock(createTestProtoBlock(6, 0xEE, 0xDD), 6);  // E: slot 6
-    try proto_array.onBlock(createTestProtoBlock(8, 0xFF, 0xEE), 8);  // F: slot 8 (missed slot 7) - HEAD
+    try proto_array.onBlock(createTestProtoBlock(1, 0xBB, 0xAA), 1); // B: slot 1
+    try proto_array.onBlock(createTestProtoBlock(3, 0xCC, 0xBB), 3); // C: slot 3 (missed slot 2)
+    try proto_array.onBlock(createTestProtoBlock(5, 0xDD, 0xCC), 5); // D: slot 5 (missed slot 4)
+    try proto_array.onBlock(createTestProtoBlock(6, 0xEE, 0xDD), 6); // E: slot 6
+    try proto_array.onBlock(createTestProtoBlock(8, 0xFF, 0xEE), 8); // F: slot 8 (missed slot 7) - HEAD
 
     // Fork branch from C (with its own missed slots pattern)
-    try proto_array.onBlock(createTestProtoBlock(4, 0x11, 0xCC), 4);  // G: slot 4, parent C
-    try proto_array.onBlock(createTestProtoBlock(6, 0x22, 0x11), 6);  // H: slot 6, parent G (missed slot 5)
-    try proto_array.onBlock(createTestProtoBlock(7, 0x33, 0x22), 7);  // I: slot 7, parent H
+    try proto_array.onBlock(createTestProtoBlock(4, 0x11, 0xCC), 4); // G: slot 4, parent C
+    try proto_array.onBlock(createTestProtoBlock(6, 0x22, 0x11), 6); // H: slot 6, parent G (missed slot 5)
+    try proto_array.onBlock(createTestProtoBlock(7, 0x33, 0x22), 7); // I: slot 7, parent H
 
     // Verify we have 9 nodes total
     try std.testing.expect(proto_array.nodes.items.len == 9);
 
     // Verify parent relationships
-    try std.testing.expect(proto_array.nodes.items[1].parent == 0);  // B -> A
-    try std.testing.expect(proto_array.nodes.items[2].parent == 1);  // C -> B
-    try std.testing.expect(proto_array.nodes.items[3].parent == 2);  // D -> C
-    try std.testing.expect(proto_array.nodes.items[6].parent == 2);  // G -> C (fork!)
+    try std.testing.expect(proto_array.nodes.items[1].parent == 0); // B -> A
+    try std.testing.expect(proto_array.nodes.items[2].parent == 1); // C -> B
+    try std.testing.expect(proto_array.nodes.items[3].parent == 2); // D -> C
+    try std.testing.expect(proto_array.nodes.items[6].parent == 2); // G -> C (fork!)
 
     // Create ForkChoice with head at F
     const anchorCP = types.Checkpoint{ .slot = 0, .root = createTestRoot(0xAA) };
@@ -1044,7 +1044,7 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
         .config = chain_config,
         .fcStore = fc_store,
         .attestations = std.AutoHashMap(usize, AttestationTracker).init(allocator),
-        .head = createTestProtoBlock(8, 0xFF, 0xEE),  // Head is F
+        .head = createTestProtoBlock(8, 0xFF, 0xEE), // Head is F
         .safeTarget = createTestProtoBlock(8, 0xFF, 0xEE),
         .deltas = std.ArrayList(isize).init(allocator),
         .logger = module_logger,
@@ -1114,9 +1114,9 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
     // All fork blocks have slot > C.slot(3), so they're potential canonical
     {
         const result = try fork_choice.getCanonicalityAnalysis(
-            createTestRoot(0xCC),  // target = C (slot 3)
-            createTestRoot(0xAA),  // prev = A
-            null,                  // canonicalViewOrNull
+            createTestRoot(0xCC), // target = C (slot 3)
+            createTestRoot(0xAA), // prev = A
+            null, // canonicalViewOrNull
         );
 
         const canonical = result[0];
@@ -1147,9 +1147,9 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
     // doesn't include E, so they become orphans
     {
         const result = try fork_choice.getCanonicalityAnalysis(
-            createTestRoot(0xFF),  // target = F (slot 8)
-            createTestRoot(0xEE),  // prev = E (slot 6)
-            null,                  // canonicalViewOrNull
+            createTestRoot(0xFF), // target = F (slot 8)
+            createTestRoot(0xEE), // prev = E (slot 6)
+            null, // canonicalViewOrNull
         );
 
         const canonical = result[0];
@@ -1172,9 +1172,9 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
     // Only D is canonical, G's parent C is NOT in canonical_blocks
     {
         const result = try fork_choice.getCanonicalityAnalysis(
-            createTestRoot(0xDD),  // target = D
-            createTestRoot(0xDD),  // prev = D (same!)
-            null,                  // canonicalViewOrNull
+            createTestRoot(0xDD), // target = D
+            createTestRoot(0xDD), // prev = D (same!)
+            null, // canonicalViewOrNull
         );
 
         const canonical = result[0];
@@ -1207,9 +1207,9 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
     // D->E is canonical path, G's parent C is NOT included
     {
         const result = try fork_choice.getCanonicalityAnalysis(
-            createTestRoot(0xEE),  // target = E (slot 6)
-            createTestRoot(0xDD),  // prev = D
-            null,                  // canonicalViewOrNull
+            createTestRoot(0xEE), // target = E (slot 6)
+            createTestRoot(0xDD), // prev = D
+            null, // canonicalViewOrNull
         );
 
         const canonical = result[0];
@@ -1232,9 +1232,9 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
     // Use target=C (slot 3) so G.slot(4) > target_slot, making G potential not canonical
     {
         const result = try fork_choice.getCanonicalityAnalysis(
-            createTestRoot(0xCC),  // target = C (slot 3)
-            null,                  // prev = null (defaults to index 0 = A)
-            null,                  // canonicalViewOrNull
+            createTestRoot(0xCC), // target = C (slot 3)
+            null, // prev = null (defaults to index 0 = A)
+            null, // canonicalViewOrNull
         );
 
         const canonical = result[0];
