@@ -383,15 +383,8 @@ pub const ForkChoice = struct {
                 current_idx -= 1;
             }
         }
-        // Verify targetAnchorRoot is present in canonical_roots (it must be, as it's the finalization target)
-        var target_found = false;
-        for (canonical_roots.items) |root| {
-            if (std.mem.eql(u8, &root, &targetAnchorRoot)) {
-                target_found = true;
-                break;
-            }
-        }
-        if (!target_found) {
+        // confirm first root in canonical_roots is the new anchor because it should have been pushed first
+        if (!std.mem.eql(u8, &canonical_roots.items[0], &targetAnchorRoot)) {
             for (canonical_roots.items, 0..) |root, index| {
                 self.logger.err("canonical root at index={d} {s}", .{
                     index,
@@ -542,6 +535,12 @@ pub const ForkChoice = struct {
     pub fn getCanonicalAncestorAtDepth(self: *Self, min_depth: usize) !ProtoBlock {
         var depth = min_depth;
         var current_idx = self.protoArray.indices.get(self.head.blockRoot) orelse return ForkChoiceError.InvalidHeadIndex;
+
+        // If depth exceeds chain length, clamp to genesis
+        if (current_idx < depth) {
+            current_idx = 0;
+            depth = 0;
+        }
 
         // Traverse parent pointers until we reach the requested depth or genesis.
         // This naturally handles missed slots since we follow parent links, not slot numbers.
@@ -954,6 +953,7 @@ fn createTestProtoBlock(slot: types.Slot, block_root_byte: u8, parent_root_byte:
         .parentRoot = createTestRoot(parent_root_byte),
         .stateRoot = createTestRoot(0x00),
         .timeliness = true,
+        .confirmed = true,
     };
 }
 
@@ -993,13 +993,13 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
     //
     // ============================================================================
 
-    var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena_allocator.deinit();
-    const allocator = arena_allocator.allocator();
+    const allocator = std.testing.allocator;
 
-    const mock_chain = try stf.genMockChain(allocator, 2, null);
+    var mock_chain = try stf.genMockChain(allocator, 2, null);
+    defer mock_chain.deinit(allocator);
 
     const spec_name = try allocator.dupe(u8, "beamdev");
+    defer allocator.free(spec_name);
     const chain_config = configs.ChainConfig{
         .id = configs.Chain.custom,
         .genesis = mock_chain.genesis_config,
@@ -1010,6 +1010,7 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
     };
 
     var beam_state = mock_chain.genesis_state;
+    defer beam_state.deinit();
     var zeam_logger_config = zeam_utils.getTestLoggerConfig();
     const module_logger = zeam_logger_config.logger(.forkchoice);
 
@@ -1020,6 +1021,8 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
     // Genesis block A at slot 0
     const anchor_block = createTestProtoBlock(0, 0xAA, 0x00);
     var proto_array = try ProtoArray.init(allocator, anchor_block);
+    defer proto_array.nodes.deinit();
+    defer proto_array.indices.deinit();
 
     // Canonical chain with missed slots
     try proto_array.onBlock(createTestProtoBlock(1, 0xBB, 0xAA), 1); // B: slot 1
@@ -1063,6 +1066,8 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
         .deltas = std.ArrayList(isize).init(allocator),
         .logger = module_logger,
     };
+    defer fork_choice.attestations.deinit();
+    defer fork_choice.deltas.deinit();
 
     // ========================================
     // TEST getCanonicalAncestorAtDepth
@@ -1132,6 +1137,9 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
             createTestRoot(0xAA), // prev = A
             null, // canonicalViewOrNull
         );
+        defer allocator.free(result[0]);
+        defer allocator.free(result[1]);
+        defer allocator.free(result[2]);
 
         const canonical = result[0];
         const potential = result[1];
@@ -1165,6 +1173,9 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
             createTestRoot(0xEE), // prev = E (slot 6)
             null, // canonicalViewOrNull
         );
+        defer allocator.free(result[0]);
+        defer allocator.free(result[1]);
+        defer allocator.free(result[2]);
 
         const canonical = result[0];
         const potential = result[1];
@@ -1190,6 +1201,9 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
             createTestRoot(0xDD), // prev = D (same!)
             null, // canonicalViewOrNull
         );
+        defer allocator.free(result[0]);
+        defer allocator.free(result[1]);
+        defer allocator.free(result[2]);
 
         const canonical = result[0];
         const potential = result[1];
@@ -1225,6 +1239,9 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
             createTestRoot(0xDD), // prev = D
             null, // canonicalViewOrNull
         );
+        defer allocator.free(result[0]);
+        defer allocator.free(result[1]);
+        defer allocator.free(result[2]);
 
         const canonical = result[0];
         const potential = result[1];
@@ -1250,6 +1267,9 @@ test "getCanonicalAncestorAtDepth and getCanonicalityAnalysis" {
             null, // prev = null (defaults to index 0 = A)
             null, // canonicalViewOrNull
         );
+        defer allocator.free(result[0]);
+        defer allocator.free(result[1]);
+        defer allocator.free(result[2]);
 
         const canonical = result[0];
         const potential = result[1];
