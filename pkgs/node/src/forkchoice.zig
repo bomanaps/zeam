@@ -1323,6 +1323,10 @@ fn createTestSignedAttestation(validator_id: usize, head_root: types.Root, slot:
 
 // Helper to build the comprehensive test tree with 9 nodes (A-I)
 // Returns ForkChoice and spec_name. Caller must manage mock_chain lifecycle separately.
+//
+// Tree structure (A-I):
+//   A(0) -> B(1) -> C(2) -> D(3) -> E(4) -> F(5)
+//                    \-> G(6) -> H(7) -> I(8)
 fn buildTestTreeWithMockChain(allocator: Allocator, mock_chain: anytype) !struct {
     fork_choice: ForkChoice,
     spec_name: []u8,
