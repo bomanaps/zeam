@@ -643,8 +643,8 @@ pub const BeamNode = struct {
         });
 
         // Record metrics
-        zeam_metrics.incrementPeerConnectionEvent(@tagName(direction), "success");
-        zeam_metrics.setConnectedPeers(self.network.getPeerCount());
+        zeam_metrics.metrics.lean_peer_connection_events_total.incr(.{ .direction = @tagName(direction), .result = "success" }) catch {};
+        zeam_metrics.metrics.lean_connected_peers.set(@intCast(self.network.getPeerCount()));
 
         const handler = self.getReqRespResponseHandler();
         const status = self.chain.getStatus();
@@ -680,8 +680,8 @@ pub const BeamNode = struct {
             });
 
             // Record metrics
-            zeam_metrics.incrementPeerDisconnectionEvent(@tagName(direction), @tagName(reason));
-            zeam_metrics.setConnectedPeers(self.network.getPeerCount());
+            zeam_metrics.metrics.lean_peer_disconnection_events_total.incr(.{ .direction = @tagName(direction), .reason = @tagName(reason) }) catch {};
+            zeam_metrics.metrics.lean_connected_peers.set(@intCast(self.network.getPeerCount()));
         }
     }
 
@@ -695,7 +695,7 @@ pub const BeamNode = struct {
         });
 
         // Record metrics for failed connection attempts
-        zeam_metrics.incrementPeerConnectionEvent(@tagName(direction), @tagName(result));
+        zeam_metrics.metrics.lean_peer_connection_events_total.incr(.{ .direction = @tagName(direction), .result = @tagName(result) }) catch {};
     }
 
     pub fn getPeerEventHandler(self: *Self) networks.OnPeerEventCbHandler {

@@ -157,48 +157,6 @@ fn observeFCAttestationValidationTimeHistogram(ctx: ?*anyopaque, value: f32) voi
     histogram.observe(value);
 }
 
-/// Increments the lean_attestations_valid_total counter with appropriate label
-pub fn incrementLeanAttestationsValid(is_from_block: bool) void {
-    if (!g_initialized or isZKVM()) return;
-
-    const source_label = if (is_from_block) "block" else "gossip";
-    metrics.lean_attestations_valid_total.incr(.{ .source = source_label }) catch |err| {
-        std.log.warn("Failed to increment valid attestations metric: {any}", .{err});
-    };
-}
-
-/// Updated function to handle labeled invalid attestations
-pub fn incrementLeanAttestationsInvalid(is_from_block: bool) void {
-    if (!g_initialized or isZKVM()) return;
-
-    const source_label = if (is_from_block) "block" else "gossip";
-    metrics.lean_attestations_invalid_total.incr(.{ .source = source_label }) catch |err| {
-        std.log.warn("Failed to increment invalid attestations metric: {any}", .{err});
-    };
-}
-
-/// Sets the current number of connected peers gauge
-pub fn setConnectedPeers(count: usize) void {
-    if (!g_initialized or isZKVM()) return;
-    metrics.lean_connected_peers.set(@intCast(count));
-}
-
-/// Increments the peer connection events counter
-pub fn incrementPeerConnectionEvent(direction: []const u8, result: []const u8) void {
-    if (!g_initialized or isZKVM()) return;
-    metrics.lean_peer_connection_events_total.incr(.{ .direction = direction, .result = result }) catch |err| {
-        std.log.warn("Failed to increment peer connection metric: {any}", .{err});
-    };
-}
-
-/// Increments the peer disconnection events counter
-pub fn incrementPeerDisconnectionEvent(direction: []const u8, reason: []const u8) void {
-    if (!g_initialized or isZKVM()) return;
-    metrics.lean_peer_disconnection_events_total.incr(.{ .direction = direction, .reason = reason }) catch |err| {
-        std.log.warn("Failed to increment peer disconnection metric: {any}", .{err});
-    };
-}
-
 fn observePQSignatureAttestationSigning(ctx: ?*anyopaque, value: f32) void {
     const histogram_ptr = ctx orelse return; // No-op if not initialized
     const histogram: *Metrics.PQSignatureSigningHistogram = @ptrCast(@alignCast(histogram_ptr));
