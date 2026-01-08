@@ -1057,20 +1057,13 @@ impl Network {
                                 &format!("Outgoing connection failed: peer={} error={:?} result={}", peer_str, error, result),
                             );
 
-                            // Notify Zig of failed connection attempt
+                            // Notify Zig of failed connection attempt and handle reconnection
                             if let Some(pid) = peer_id {
                                 let peer_id_cstr = match CString::new(pid.to_string()) {
                                     Ok(cstr) => cstr,
                                     Err(_) => {
+                                        // Invalid peer_id string - can't communicate with Zig, don't retry
                                         logger::rustLogger.error(self.network_id, &format!("invalid_peer_id_string={}", pid));
-                                        // Continue to reconnection logic below
-                                        if let Some((addr, attempt)) = RECONNECT_ATTEMPTS
-                                            .lock()
-                                            .unwrap()
-                                            .remove(&(self.network_id, pid))
-                                        {
-                                            self.schedule_reconnection(pid, addr, attempt + 1);
-                                        }
                                         continue;
                                     }
                                 };
@@ -1082,9 +1075,8 @@ impl Network {
                                         result,
                                     )
                                 };
-                            }
 
-                            if let Some(pid) = peer_id {
+                                // Schedule reconnection if this was a tracked connection attempt
                                 if let Some((addr, attempt)) = RECONNECT_ATTEMPTS
                                     .lock()
                                     .unwrap()
