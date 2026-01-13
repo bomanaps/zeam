@@ -469,6 +469,27 @@ pub const BeamNode = struct {
                                     self.node_registry.getNodeNameFromPeerId(status_ctx.peer_id),
                                 });
                             }
+
+                            // Proactive initial sync: if peer is ahead of us, request their head block
+                            // This triggers parent syncing which will fetch all blocks back to our current state
+                            const our_head_slot = self.chain.forkChoice.head.slot;
+                            if (status_resp.head_slot > our_head_slot) {
+                                self.logger.info("peer {s}{} is ahead (peer_head_slot={d} > our_head_slot={d}), initiating sync by requesting head block 0x{s}", .{
+                                    status_ctx.peer_id,
+                                    self.node_registry.getNodeNameFromPeerId(status_ctx.peer_id),
+                                    status_resp.head_slot,
+                                    our_head_slot,
+                                    std.fmt.fmtSliceHexLower(&status_resp.head_root),
+                                });
+                                const roots = [_]types.Root{status_resp.head_root};
+                                self.fetchBlockByRoots(&roots, 0) catch |err| {
+                                    self.logger.warn("failed to initiate sync by fetching head block from peer {s}{}: {any}", .{
+                                        status_ctx.peer_id,
+                                        self.node_registry.getNodeNameFromPeerId(status_ctx.peer_id),
+                                        err,
+                                    });
+                                };
+                            }
                         },
                         else => {
                             self.logger.warn("status response did not match tracked request_id={d} from peer={s}{}", .{ request_id, peer_id, node_name });
