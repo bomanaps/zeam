@@ -56,6 +56,7 @@ pub const NodeCommand = struct {
     @"sig-keys-dir": []const u8 = "hash-sig-keys",
     @"network-dir": []const u8 = "./network",
     @"data-dir": []const u8 = constants.DEFAULT_DATA_DIR,
+    @"checkpoint-sync-url": ?[]const u8 = null,
 
     pub const __shorts__ = .{
         .help = .h,
@@ -73,6 +74,7 @@ pub const NodeCommand = struct {
         .override_genesis_time = "Override genesis time in the config.yaml",
         .@"sig-keys-dir" = "Relative path of custom genesis to signature key directory",
         .@"data-dir" = "Path to the data directory",
+        .@"checkpoint-sync-url" = "URL to fetch finalized checkpoint state from for checkpoint sync (e.g., http://localhost:5052/lean/states/finalized)",
         .help = "Show help information for the node command",
     };
 };
@@ -303,8 +305,12 @@ fn mainInner() !void {
                 return err;
             };
 
+            // Create logger config for API server
+            var api_logger_config = utils_lib.getLoggerConfig(console_log_level, utils_lib.FileBehaviourParams{ .fileActiveLevel = log_file_active_level, .filePath = beamcmd.data_dir, .fileName = log_filename, .monocolorFile = monocolor_file_log });
+
             // Start metrics HTTP server
-            api_server.startAPIServer(allocator, beamcmd.metricsPort) catch |err| {
+            // Pass null for chain - in .beam command mode, chains are created later and the checkpoint sync endpoint won't be available
+            api_server.startAPIServer(allocator, beamcmd.metricsPort, &api_logger_config, null) catch |err| {
                 ErrorHandler.logErrorWithDetails(err, "start API server", .{ .port = beamcmd.metricsPort });
                 return err;
             };
