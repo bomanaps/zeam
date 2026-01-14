@@ -893,6 +893,7 @@ test "Node peer tracking on connect/disconnect" {
     const allocator = arena_allocator.allocator();
     var ctx = try testing.NodeTestContext.init(allocator, .{});
     defer ctx.deinit();
+    ctx.fixupDbLogger(); // Fix dangling logger pointer after struct has stable address
 
     // Create empty node registry for test - shared between Mock and node
     const test_registry = try allocator.create(NodeNameRegistry);
@@ -1017,6 +1018,7 @@ test "Node: fetched blocks cache and deduplication" {
 
     var ctx = try testing.NodeTestContext.init(allocator, .{});
     defer ctx.deinit();
+    ctx.fixupDbLogger(); // Fix dangling logger pointer after struct has stable address
 
     var mock = try networks.Mock.init(allocator, ctx.loopPtr(), ctx.loggerConfig().logger(.mock), null);
     defer mock.deinit();
@@ -1129,6 +1131,7 @@ test "Node: processCachedDescendants basic flow" {
 
     var ctx = try testing.NodeTestContext.init(allocator, .{});
     defer ctx.deinit();
+    ctx.fixupDbLogger(); // Fix dangling logger pointer after struct has stable address
 
     var mock = try networks.Mock.init(allocator, ctx.loopPtr(), ctx.loggerConfig().logger(.mock), null);
     defer mock.deinit();
@@ -1245,6 +1248,7 @@ test "Node: pruneCachedBlockSubtree prunes root and all cached descendants" {
 
     var ctx = try testing.NodeTestContext.init(allocator, .{});
     defer ctx.deinit();
+    ctx.fixupDbLogger(); // Fix dangling logger pointer after struct has stable address
 
     var mock = try networks.Mock.init(allocator, ctx.loopPtr(), ctx.loggerConfig().logger(.mock), null);
     defer mock.deinit();
@@ -1320,6 +1324,7 @@ test "Node: pruneCachedBlockSubtree prunes only the selected sub-branch" {
 
     var ctx = try testing.NodeTestContext.init(allocator, .{});
     defer ctx.deinit();
+    ctx.fixupDbLogger(); // Fix dangling logger pointer after struct has stable address
 
     var mock = try networks.Mock.init(allocator, ctx.loopPtr(), ctx.loggerConfig().logger(.mock), null);
     defer mock.deinit();
@@ -1386,6 +1391,7 @@ test "Node: pruneCachedBlockSubtree prunes cached descendants even if root is no
 
     var ctx = try testing.NodeTestContext.init(allocator, .{});
     defer ctx.deinit();
+    ctx.fixupDbLogger(); // Fix dangling logger pointer after struct has stable address
 
     var mock = try networks.Mock.init(allocator, ctx.loopPtr(), ctx.loggerConfig().logger(.mock), null);
     defer mock.deinit();
