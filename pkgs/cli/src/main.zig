@@ -534,46 +534,36 @@ fn mainInner() !void {
 
             // Node 3 setup - delayed start for initial sync testing
             // This node starts after nodes 1,2 reach finalization and will sync from peers
-            // We use a DelayedNodeStarter to start node 3 after finalization is reached
-            const DelayedNodeStarter = struct {
-                allocator: std.mem.Allocator,
+            // We init node 3 upfront but only call run() after finalization is reached
+            var beam_node_3: BeamNode = undefined;
+            try beam_node_3.init(allocator, .{
+                .nodeId = 2,
+                .config = chain_config,
+                .anchorState = &anchorState,
+                .backend = backend3,
+                .clock = clock,
+                .validator_ids = &validator_ids_3,
+                .key_manager = &key_manager,
+                .db = db_3,
+                .logger_config = &logger3_config,
+                .node_registry = registry_3,
+            });
+
+            // Delayed runner - only needs the node pointer since init() is already done
+            // With 3 validators, finalization happens around slot 3-4, so we wait ~20 slots
+            // to be safe (20 slots * 4 intervals/slot = 80 intervals)
+            const DelayedNodeRunner = struct {
                 beam_node: *BeamNode,
-                chain_config: ChainConfig,
-                anchor_state: *types.BeamState,
-                backend: networks.NetworkInterface,
-                clock_ptr: *Clock,
-                validator_ids: []usize,
-                key_manager: *const key_manager_lib.KeyManager,
-                db: database.Db,
-                logger_config: *utils_lib.ZeamLoggerConfig,
-                node_registry: *const node_lib.NodeNameRegistry,
                 started: bool = false,
-                // Number of intervals to wait before starting node 3 (allows time for finalization)
-                // With 3 validators, finalization happens at around slot 3-4, so we wait ~20 slots
-                // to be safe (20 slots * 4 intervals/slot = 80 intervals)
-                start_after_intervals: usize = 80,
+                const start_after_intervals: usize = 80;
 
-                const SelfDelayed = @This();
-
-                pub fn checkAndStart(self: *SelfDelayed, current_interval: usize) !void {
+                pub fn onInterval(ptr: *anyopaque, interval: isize) !void {
+                    const self: *@This() = @ptrCast(@alignCast(ptr));
                     if (self.started) return;
-                    if (current_interval < self.start_after_intervals) return;
+                    if (interval < 0 or @as(usize, @intCast(interval)) < start_after_intervals) return;
 
-                    std.debug.print("\n=== STARTING NODE 3 (delayed sync node) at interval {d} ===\n", .{current_interval});
+                    std.debug.print("\n=== STARTING NODE 3 (delayed sync node) at interval {d} ===\n", .{interval});
                     std.debug.print("=== Node 3 will sync from genesis using parent block syncing ===\n\n", .{});
-
-                    try self.beam_node.init(self.allocator, .{
-                        .nodeId = 2,
-                        .config = self.chain_config,
-                        .anchorState = self.anchor_state,
-                        .backend = self.backend,
-                        .clock = self.clock_ptr,
-                        .validator_ids = self.validator_ids,
-                        .key_manager = self.key_manager,
-                        .db = self.db,
-                        .logger_config = self.logger_config,
-                        .node_registry = self.node_registry,
-                    });
 
                     try self.beam_node.run();
                     self.started = true;
@@ -582,47 +572,18 @@ fn mainInner() !void {
                 }
             };
 
-            var beam_node_3: BeamNode = undefined;
-            var delayed_starter = DelayedNodeStarter{
-                .allocator = allocator,
-                .beam_node = &beam_node_3,
-                .chain_config = chain_config,
-                .anchor_state = &anchorState,
-                .backend = backend3,
-                .clock_ptr = clock,
-                .validator_ids = &validator_ids_3,
-                .key_manager = &key_manager,
-                .db = db_3,
-                .logger_config = &logger3_config,
-                .node_registry = registry_3,
-            };
-
-            // Wrapper to integrate delayed starter with clock intervals
-            const DelayedStartWrapper = struct {
-                starter: *DelayedNodeStarter,
-
-                const SelfWrapper = @This();
-
-                pub fn onInterval(ptr: *anyopaque, interval: isize) !void {
-                    const self: *SelfWrapper = @ptrCast(@alignCast(ptr));
-                    if (interval > 0) {
-                        try self.starter.checkAndStart(@intCast(interval));
-                    }
-                }
-            };
-
-            var delayed_wrapper = DelayedStartWrapper{ .starter = &delayed_starter };
+            var delayed_runner = DelayedNodeRunner{ .beam_node = &beam_node_3 };
             const delayed_cb = try allocator.create(node_lib.utils.OnIntervalCbWrapper);
             delayed_cb.* = .{
-                .ptr = &delayed_wrapper,
-                .onIntervalCb = DelayedStartWrapper.onInterval,
+                .ptr = &delayed_runner,
+                .onIntervalCb = DelayedNodeRunner.onInterval,
             };
 
             // Start nodes 1, 2 immediately (node 3 starts delayed after finalization)
             try beam_node_1.run();
             try beam_node_2.run();
 
-            // Register delayed starter callback with clock
+            // Register delayed runner callback with clock
             try clock.subscribeOnSlot(delayed_cb);
 
             if (!mock_network) {
