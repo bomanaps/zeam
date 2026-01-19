@@ -750,15 +750,89 @@ pub const ForkChoice = struct {
     }
 
     pub fn updateHead(self: *Self) !ProtoBlock {
+        const previous_head = self.head;
         self.head = try self.computeFCHead(true, 0);
+
         // Update the lean_head_slot metric
         zeam_metrics.metrics.lean_head_slot.set(self.head.slot);
+
+        // Detect reorg: if head changed and previous head is not an ancestor of new head
+        if (!std.mem.eql(u8, &self.head.blockRoot, &previous_head.blockRoot)) {
+            const is_extension = self.isAncestorOf(previous_head.blockRoot, self.head.blockRoot);
+            if (!is_extension) {
+                // Reorg detected - previous head is NOT an ancestor of new head
+                const depth = self.calculateReorgDepth(previous_head.blockRoot, self.head.blockRoot);
+                zeam_metrics.metrics.lean_fork_choice_reorgs_total.incr();
+                zeam_metrics.metrics.lean_fork_choice_reorg_depth.observe(@floatFromInt(depth));
+                self.logger.info("fork choice reorg detected: depth={d} old_head_slot={d} new_head_slot={d}", .{
+                    depth,
+                    previous_head.slot,
+                    self.head.slot,
+                });
+            }
+        }
+
         return self.head;
+    }
+
+    /// Checks if potential_ancestor is an ancestor of descendant by walking up parent chain.
+    fn isAncestorOf(self: *Self, potential_ancestor: types.Root, descendant: types.Root) bool {
+        var current_idx = self.protoArray.indices.get(descendant) orelse return false;
+
+        while (true) {
+            const current_node = self.protoArray.nodes.items[current_idx];
+            if (std.mem.eql(u8, &current_node.blockRoot, &potential_ancestor)) {
+                return true;
+            }
+            if (current_node.parent) |parent_idx| {
+                current_idx = parent_idx;
+            } else {
+                return false;
+            }
+        }
+    }
+
+    /// Calculate the reorg depth by finding the common ancestor and counting
+    /// how many blocks were "rolled back" from old head to common ancestor.
+    fn calculateReorgDepth(self: *Self, old_head_root: types.Root, new_head_root: types.Root) usize {
+        // Build set of ancestors of new head
+        var new_head_ancestors = std.AutoHashMap(types.Root, void).init(self.allocator);
+        defer new_head_ancestors.deinit();
+
+        var current_idx = self.protoArray.indices.get(new_head_root) orelse return 0;
+        while (true) {
+            const current_node = self.protoArray.nodes.items[current_idx];
+            new_head_ancestors.put(current_node.blockRoot, {}) catch {};
+            if (current_node.parent) |parent_idx| {
+                current_idx = parent_idx;
+            } else {
+                break;
+            }
+        }
+
+        // Walk up from old head counting blocks until we hit a common ancestor
+        var depth: usize = 0;
+        var old_idx = self.protoArray.indices.get(old_head_root) orelse return 0;
+        while (true) {
+            const old_node = self.protoArray.nodes.items[old_idx];
+            if (new_head_ancestors.contains(old_node.blockRoot)) {
+                return depth;
+            }
+            depth += 1;
+            if (old_node.parent) |parent_idx| {
+                old_idx = parent_idx;
+            } else {
+                break;
+            }
+        }
+        return depth;
     }
 
     pub fn updateSafeTarget(self: *Self) !ProtoBlock {
         const cutoff_weight = try std.math.divCeil(u64, 2 * self.config.genesis.numValidators(), 3);
         self.safeTarget = try self.computeFCHead(false, cutoff_weight);
+        // Update safe target slot metric
+        zeam_metrics.metrics.lean_safe_target_slot.set(self.safeTarget.slot);
         return self.safeTarget;
     }
 
