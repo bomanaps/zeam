@@ -915,8 +915,12 @@ pub const BeamNode = struct {
     pub fn run(self: *Self) !void {
         // Catch up fork choice time to current interval before processing any requests.
         // This prevents FutureSlot errors when receiving blocks via RPC immediately after starting.
+        // Only catch up if the gap is reasonable (< 10000 intervals) to avoid infinite loops
+        // in tests where genesis_time=0 would result in millions of intervals.
         const current_interval = self.clock.current_interval;
-        if (current_interval > 0) {
+        const fc_time: isize = @intCast(self.chain.forkChoice.fcStore.time);
+        const gap = current_interval - fc_time;
+        if (current_interval > 0 and gap > 0 and gap < 10000) {
             try self.chain.forkChoice.onInterval(@intCast(current_interval), false);
             self.logger.info("fork choice time caught up to interval {d}", .{current_interval});
         }
