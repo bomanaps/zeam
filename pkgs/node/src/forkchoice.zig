@@ -776,20 +776,22 @@ pub const ForkChoice = struct {
     }
 
     /// Checks if potential_ancestor is an ancestor of descendant by walking up parent chain.
+    /// Note: descendant must exist in protoArray (it comes from computeFCHead which retrieves
+    /// it directly from protoArray.nodes). If not found, it indicates a bug in the code.
     fn isAncestorOf(self: *Self, potential_ancestor: types.Root, descendant: types.Root) bool {
-        var current_idx = self.protoArray.indices.get(descendant) orelse return false;
+        // descendant is guaranteed to exist - it comes from computeFCHead() which
+        // retrieves it directly from protoArray.nodes.
+        var maybe_idx: ?usize = self.protoArray.indices.get(descendant);
+        if (maybe_idx == null) unreachable; // invariant violation - descendant must exist
 
-        while (true) {
-            const current_node = self.protoArray.nodes.items[current_idx];
+        while (maybe_idx) |idx| {
+            const current_node = self.protoArray.nodes.items[idx];
             if (std.mem.eql(u8, &current_node.blockRoot, &potential_ancestor)) {
                 return true;
             }
-            if (current_node.parent) |parent_idx| {
-                current_idx = parent_idx;
-            } else {
-                return false;
-            }
+            maybe_idx = current_node.parent;
         }
+        return false;
     }
 
     /// Calculate the reorg depth by finding the common ancestor and counting
@@ -799,31 +801,30 @@ pub const ForkChoice = struct {
         var new_head_ancestors = std.AutoHashMap(types.Root, void).init(self.allocator);
         defer new_head_ancestors.deinit();
 
-        var current_idx = self.protoArray.indices.get(new_head_root) orelse return 0;
-        while (true) {
-            const current_node = self.protoArray.nodes.items[current_idx];
+        // new_head_root is guaranteed to exist - it comes from computeFCHead() which
+        // retrieves it directly from protoArray.nodes.
+        var maybe_idx: ?usize = self.protoArray.indices.get(new_head_root);
+        if (maybe_idx == null) unreachable; // invariant violation - new_head must exist
+
+        while (maybe_idx) |idx| {
+            const current_node = self.protoArray.nodes.items[idx];
             new_head_ancestors.put(current_node.blockRoot, {}) catch {};
-            if (current_node.parent) |parent_idx| {
-                current_idx = parent_idx;
-            } else {
-                break;
-            }
+            maybe_idx = current_node.parent;
         }
 
         // Walk up from old head counting blocks until we hit a common ancestor
+        // old_head_root could potentially be pruned in edge cases, so use defensive return 0
         var depth: usize = 0;
-        var old_idx = self.protoArray.indices.get(old_head_root) orelse return 0;
-        while (true) {
-            const old_node = self.protoArray.nodes.items[old_idx];
+        var maybe_old_idx: ?usize = self.protoArray.indices.get(old_head_root);
+        if (maybe_old_idx == null) return 0; // defensive - old head could be pruned
+
+        while (maybe_old_idx) |idx| {
+            const old_node = self.protoArray.nodes.items[idx];
             if (new_head_ancestors.contains(old_node.blockRoot)) {
                 return depth;
             }
             depth += 1;
-            if (old_node.parent) |parent_idx| {
-                old_idx = parent_idx;
-            } else {
-                break;
-            }
+            maybe_old_idx = old_node.parent;
         }
         return depth;
     }
