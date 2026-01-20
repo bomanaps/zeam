@@ -799,10 +799,14 @@ pub const ForkChoice = struct {
 
         // Detect reorg: if head changed and previous head is not an ancestor of new head
         if (!std.mem.eql(u8, &self.head.blockRoot, &previous_head.blockRoot)) {
-            const is_extension = self.isAncestorOf(previous_head.blockRoot, self.head.blockRoot);
+            // Build ancestor map while checking - reused in calculateReorgDepth if reorg detected
+            var new_head_ancestors = std.AutoHashMap(types.Root, void).init(self.allocator);
+            defer new_head_ancestors.deinit();
+
+            const is_extension = self.isAncestorOf(previous_head.blockRoot, self.head.blockRoot, &new_head_ancestors);
             if (!is_extension) {
                 // Reorg detected - previous head is NOT an ancestor of new head
-                const depth = self.calculateReorgDepth(previous_head.blockRoot, self.head.blockRoot);
+                const depth = self.calculateReorgDepth(previous_head.blockRoot, &new_head_ancestors);
                 zeam_metrics.metrics.lean_fork_choice_reorgs_total.incr();
                 zeam_metrics.metrics.lean_fork_choice_reorg_depth.observe(@floatFromInt(depth));
                 self.logger.info("fork choice reorg detected: depth={d} old_head_slot={d} new_head_slot={d}", .{
@@ -817,9 +821,10 @@ pub const ForkChoice = struct {
     }
 
     /// Checks if potential_ancestor is an ancestor of descendant by walking up parent chain.
+    /// Populates ancestors_map with all visited nodes for reuse in calculateReorgDepth.
     /// Note: descendant must exist in protoArray (it comes from computeFCHead which retrieves
     /// it directly from protoArray.nodes). If not found, it indicates a bug in the code.
-    fn isAncestorOf(self: *Self, potential_ancestor: types.Root, descendant: types.Root) bool {
+    fn isAncestorOf(self: *Self, potential_ancestor: types.Root, descendant: types.Root, ancestors_map: *std.AutoHashMap(types.Root, void)) bool {
         // descendant is guaranteed to exist - it comes from computeFCHead() which
         // retrieves it directly from protoArray.nodes.
         var maybe_idx: ?usize = self.protoArray.indices.get(descendant);
@@ -827,6 +832,7 @@ pub const ForkChoice = struct {
 
         while (maybe_idx) |idx| {
             const current_node = self.protoArray.nodes.items[idx];
+            ancestors_map.put(current_node.blockRoot, {}) catch {};
             if (std.mem.eql(u8, &current_node.blockRoot, &potential_ancestor)) {
                 return true;
             }
@@ -835,24 +841,9 @@ pub const ForkChoice = struct {
         return false;
     }
 
-    /// Calculate the reorg depth by finding the common ancestor and counting
-    /// how many blocks were "rolled back" from old head to common ancestor.
-    fn calculateReorgDepth(self: *Self, old_head_root: types.Root, new_head_root: types.Root) usize {
-        // Build set of ancestors of new head
-        var new_head_ancestors = std.AutoHashMap(types.Root, void).init(self.allocator);
-        defer new_head_ancestors.deinit();
-
-        // new_head_root is guaranteed to exist - it comes from computeFCHead() which
-        // retrieves it directly from protoArray.nodes.
-        var maybe_idx: ?usize = self.protoArray.indices.get(new_head_root);
-        if (maybe_idx == null) unreachable; // invariant violation - new_head must exist
-
-        while (maybe_idx) |idx| {
-            const current_node = self.protoArray.nodes.items[idx];
-            new_head_ancestors.put(current_node.blockRoot, {}) catch {};
-            maybe_idx = current_node.parent;
-        }
-
+    /// Calculate the reorg depth by counting blocks from old head to common ancestor.
+    /// Uses pre-built new_head_ancestors map from isAncestorOf to avoid redundant traversal.
+    fn calculateReorgDepth(self: *Self, old_head_root: types.Root, new_head_ancestors: *std.AutoHashMap(types.Root, void)) usize {
         // Walk up from old head counting blocks until we hit a common ancestor
         // old_head_root could potentially be pruned in edge cases, so use defensive return 0
         var depth: usize = 0;
