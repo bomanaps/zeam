@@ -60,8 +60,9 @@ pub const Mock = struct {
         method: interface.LeanSupportedProtocol,
         sender_peer_id: []const u8,
         finished: bool = false,
-        // Buffer responses for async delivery to avoid timing issues
-        // where the caller hasn't finished setting up request tracking
+        // Buffer responses for async delivery to avoid timing issues.
+        // In the mock, the target handler is called synchronously within sendRequest(),
+        // so responses would arrive before sendRequest() returns the request_id.
         buffered_responses: std.ArrayListUnmanaged(interface.ReqRespResponse) = .empty,
         error_response: ?struct { code: u32, message: []const u8 } = null,
     };
