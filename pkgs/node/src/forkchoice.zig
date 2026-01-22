@@ -777,12 +777,12 @@ pub const ForkChoice = struct {
         const best_descendant_idx = justified_node.bestDescendant orelse justified_idx;
         const best_descendant = self.protoArray.nodes.items[best_descendant_idx];
 
-        self.logger.debug("computeFCHead from_known={} cutoff_weight={d} deltas={any} justified_node={any} best_descendant_idx={d}", .{
-            //
+        self.logger.debug("computeFCHead from_known={} cutoff_weight={d} deltas_len={d} justified_slot={d} justified_weight={d} best_descendant_idx={d}", .{
             from_known,
             cutoff_weight,
-            deltas,
-            justified_node,
+            deltas.len,
+            justified_node.slot,
+            justified_node.weight,
             best_descendant_idx,
         });
 

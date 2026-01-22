@@ -229,7 +229,7 @@ fn mainInner() !void {
     const monocolor_file_log = opts.args.monocolor_file_log;
     const console_log_level = opts.args.console_log_level;
 
-    std.debug.print("opts ={any} genesis={d}\n", .{ opts.args, genesis });
+    std.debug.print("genesis={d}\n", .{genesis});
 
     switch (opts.args.__commands__) {
         .clock => {
@@ -241,7 +241,7 @@ fn mainInner() !void {
                 ErrorHandler.logErrorWithOperation(err, "initialize clock");
                 return err;
             };
-            std.debug.print("clock {any}\n", .{clock});
+            std.debug.print("clock initialized with genesis={d}\n", .{genesis});
 
             clock.run() catch |err| {
                 ErrorHandler.logErrorWithOperation(err, "run clock service");
@@ -320,7 +320,7 @@ fn mainInner() !void {
                 return err;
             };
 
-            std.debug.print("beam opts ={any}\n", .{beamcmd});
+            std.debug.print("beam mockNetwork={} api-port={d}\n", .{ beamcmd.mockNetwork, beamcmd.@"api-port" });
 
             const mock_network = beamcmd.mockNetwork;
 
@@ -409,7 +409,7 @@ fn mainInner() !void {
                 network.* = try networks.Mock.init(allocator, loop, logger1_config.logger(.network), shared_registry);
                 backend1 = network.getNetworkInterface();
                 backend2 = network.getNetworkInterface();
-                logger1_config.logger(null).debug("--- mock gossip {any}", .{backend1.gossip});
+                logger1_config.logger(null).debug("--- mock gossip handler initialized", .{});
             } else {
                 network1 = try allocator.create(networks.EthLibp2p);
                 const key_pair1 = enr_lib.KeyPair.generate();
@@ -454,7 +454,7 @@ fn mainInner() !void {
                     .node_registry = test_registry2,
                 }, logger2_config.logger(.network));
                 backend2 = network2.getNetworkInterface();
-                logger1_config.logger(null).debug("--- ethlibp2p gossip {any}", .{backend1.gossip});
+                logger1_config.logger(null).debug("--- ethlibp2p gossip handler initialized", .{});
             }
 
             var clock = try allocator.create(Clock);

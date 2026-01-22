@@ -342,7 +342,7 @@ pub const BeamChain = struct {
         const block_str = try block.toJsonString(self.allocator);
         defer self.allocator.free(block_str);
 
-        self.module_logger.debug("node-{d}::going for block production opts={any} raw block={s}", .{ self.nodeId, opts, block_str });
+        self.module_logger.debug("node-{d}::going for block production slot={d} raw block={s}", .{ self.nodeId, block.slot, block_str });
 
         // 2. apply STF to get post state & update post state root & cache it
         try stf.apply_raw_block(self.allocator, post_state, &block, self.block_building_logger);
@@ -350,7 +350,7 @@ pub const BeamChain = struct {
         const block_str_2 = try block.toJsonString(self.allocator);
         defer self.allocator.free(block_str_2);
 
-        self.module_logger.debug("applied raw block opts={any} raw block={s}", .{ opts, block_str_2 });
+        self.module_logger.debug("applied raw block slot={d} raw block={s}", .{ block.slot, block_str_2 });
 
         // 3. cache state to save recompute while adding the block on publish
         var block_root: [32]u8 = undefined;
@@ -496,7 +496,7 @@ pub const BeamChain = struct {
                 //check if we have the block already in forkchoice
                 const hasBlock = self.forkChoice.hasBlock(block_root);
 
-                self.module_logger.debug("chain received gossip block for slot={any} blockroot={any} proposer={d}{} hasBlock={any} from peer={s}{}", .{
+                self.module_logger.debug("chain received gossip block for slot={d} blockroot=0x{s} proposer={d}{} hasBlock={} from peer={s}{}", .{
                     block.slot,
                     std.fmt.fmtSliceHexLower(&block_root),
                     block.proposer_index,
@@ -514,8 +514,7 @@ pub const BeamChain = struct {
                     const missing_roots = self.onBlock(signed_block, .{
                         .blockRoot = block_root,
                     }) catch |err| {
-                        self.module_logger.err("error processing block for slot={any} root={any}: {any}", .{
-                            //
+                        self.module_logger.err("error processing block for slot={d} root=0x{s}: {any}", .{
                             block.slot,
                             std.fmt.fmtSliceHexLower(&block_root),
                             err,
@@ -535,8 +534,7 @@ pub const BeamChain = struct {
                         .missing_attestation_roots = missing_roots,
                     };
                 } else {
-                    self.module_logger.debug("skipping processing the already present block slot={any} blockroot={any}", .{
-                        //
+                    self.module_logger.debug("skipping processing the already present block slot={d} blockroot=0x{s}", .{
                         block.slot,
                         std.fmt.fmtSliceHexLower(&block_root),
                     });
@@ -690,7 +688,7 @@ pub const BeamChain = struct {
 
                     self.forkChoice.onAttestation(attestation, true) catch |e| {
                         zeam_metrics.metrics.lean_attestations_invalid_total.incr(.{ .source = "block" }) catch {};
-                        self.module_logger.err("error processing block attestation={any} e={any}", .{ attestation, e });
+                        self.module_logger.err("error processing block attestation validator={d} slot={d} error={any}", .{ attestation.validator_id, attestation.data.slot, e });
                         continue;
                     };
                     zeam_metrics.metrics.lean_attestations_valid_total.incr(.{ .source = "block" }) catch {};
@@ -712,7 +710,7 @@ pub const BeamChain = struct {
             .signature = proposer_signature,
         };
         self.forkChoice.onGossipAttestation(signed_proposer_attestation, false) catch |e| {
-            self.module_logger.err("error processing proposer attestation={any} e={any}", .{ signed_proposer_attestation, e });
+            self.module_logger.err("error processing proposer attestation validator={d} slot={d} error={any}", .{ signed_proposer_attestation.validator_id, signed_proposer_attestation.message.slot, e });
         };
 
         const processing_time = onblock_timer.observe();
@@ -1024,8 +1022,7 @@ pub const BeamChain = struct {
         const hasParentBlock = self.forkChoice.hasBlock(block.parent_root);
 
         if (!hasParentBlock) {
-            self.module_logger.warn("gossip block validation failed slot={any} with unknown parent={any}", .{
-                //
+            self.module_logger.warn("gossip block validation failed slot={d} with unknown parent=0x{s}", .{
                 block.slot,
                 std.fmt.fmtSliceHexLower(&block.parent_root),
             });
