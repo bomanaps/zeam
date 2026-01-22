@@ -64,6 +64,13 @@ pub const GossipSub = struct {
     subscribeFn: *const fn (ptr: *anyopaque, topics: []GossipTopic, handler: OnGossipCbHandler) anyerror!void,
     onGossipFn: *const fn (ptr: *anyopaque, data: *GossipMessage, sender_peer_id: []const u8) anyerror!void,
 
+    pub fn format(self: GossipSub, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = self;
+        _ = fmt;
+        _ = options;
+        try writer.writeAll("GossipSub");
+    }
+
     pub fn subscribe(self: GossipSub, topics: []GossipTopic, handler: OnGossipCbHandler) anyerror!void {
         return self.subscribeFn(self.ptr, topics, handler);
     }
@@ -110,6 +117,13 @@ pub const OnGossipCbHandler = struct {
     ptr: *anyopaque,
     onGossipCb: OnGossipCbType,
     // c: xev.Completion = undefined,
+
+    pub fn format(self: OnGossipCbHandler, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = self;
+        _ = fmt;
+        _ = options;
+        try writer.writeAll("OnGossipCbHandler");
+    }
 
     pub fn onGossip(self: OnGossipCbHandler, data: *const GossipMessage, sender_peer_id: []const u8) anyerror!void {
         return self.onGossipCb(self.ptr, data, sender_peer_id);
@@ -620,6 +634,16 @@ const MessagePublishWrapper = struct {
     logger: zeam_utils.ModuleLogger,
 
     const Self = @This();
+
+    pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("MessagePublishWrapper{{ networkId={d}, topic={s}, sender={s} }}", .{
+            self.networkId,
+            self.data.getGossipTopic().encode(),
+            self.sender_peer_id,
+        });
+    }
 
     fn init(allocator: Allocator, handler: OnGossipCbHandler, data: *const GossipMessage, sender_peer_id: []const u8, networkId: u32, logger: zeam_utils.ModuleLogger) !*Self {
         const cloned_data = try data.clone(allocator);
