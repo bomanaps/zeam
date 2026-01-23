@@ -80,6 +80,23 @@ pub const NodeCommand = struct {
     };
 };
 
+const BeamCmd = struct {
+    help: bool = false,
+    mockNetwork: bool = false,
+    @"api-port": u16 = constants.DEFAULT_API_PORT,
+    data_dir: []const u8 = constants.DEFAULT_DATA_DIR,
+
+    pub fn format(self: BeamCmd, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("BeamCmd{{ mockNetwork={}, api-port={d}, data_dir=\"{s}\" }}", .{
+            self.mockNetwork,
+            self.@"api-port",
+            self.data_dir,
+        });
+    }
+};
+
 const ZeamArgs = struct {
     genesis: u64 = 1234,
     log_filename: []const u8 = "consensus", // Default logger filename
@@ -93,12 +110,7 @@ const ZeamArgs = struct {
         clock: struct {
             help: bool = false,
         },
-        beam: struct {
-            help: bool = false,
-            mockNetwork: bool = false,
-            @"api-port": u16 = constants.DEFAULT_API_PORT,
-            data_dir: []const u8 = constants.DEFAULT_DATA_DIR,
-        },
+        beam: BeamCmd,
         prove: struct {
             dist_dir: []const u8 = "zig-out/bin",
             zkvm: state_proving_manager.ZKVMs = .risc0,
@@ -179,7 +191,7 @@ const ZeamArgs = struct {
         try writer.writeAll(", command=");
         switch (self.__commands__) {
             .clock => try writer.writeAll("clock"),
-            .beam => |cmd| try writer.print("beam(mockNetwork={}, api-port={d}, data_dir=\"{s}\")", .{ cmd.mockNetwork, cmd.@"api-port", cmd.data_dir }),
+            .beam => |cmd| try writer.print("{any}", .{cmd}),
             .prove => |cmd| try writer.print("prove(zkvm={s}, dist_dir=\"{s}\")", .{ @tagName(cmd.zkvm), cmd.dist_dir }),
             .prometheus => |cmd| switch (cmd.__commands__) {
                 .genconfig => |genconfig| try writer.print("prometheus.genconfig(api_port={d}, filename=\"{s}\")", .{ genconfig.@"api-port", genconfig.filename }),
@@ -319,6 +331,8 @@ fn mainInner() !void {
                 ErrorHandler.logErrorWithDetails(err, "start API server", .{ .port = beamcmd.@"api-port" });
                 return err;
             };
+
+            std.debug.print("beam={any}\n", .{beamcmd});
 
             const mock_network = beamcmd.mockNetwork;
 

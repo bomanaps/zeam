@@ -31,6 +31,12 @@ const ZERO_SIGBYTES = types.ZERO_SIGBYTES;
 pub const BlockProductionParams = struct {
     slot: usize,
     proposer_index: usize,
+
+    pub fn format(self: BlockProductionParams, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("BlockProductionParams{{ slot={d}, proposer_index={d} }}", .{ self.slot, self.proposer_index });
+    }
 };
 
 pub const AttestationConstructionParams = struct {
@@ -342,7 +348,7 @@ pub const BeamChain = struct {
         const block_str = try block.toJsonString(self.allocator);
         defer self.allocator.free(block_str);
 
-        self.module_logger.debug("node-{d}::going for block production slot={d} raw block={s}", .{ self.nodeId, block.slot, block_str });
+        self.module_logger.debug("node-{d}::going for block production opts={any} raw block={s}", .{ self.nodeId, opts, block_str });
 
         // 2. apply STF to get post state & update post state root & cache it
         try stf.apply_raw_block(self.allocator, post_state, &block, self.block_building_logger);
@@ -350,7 +356,7 @@ pub const BeamChain = struct {
         const block_str_2 = try block.toJsonString(self.allocator);
         defer self.allocator.free(block_str_2);
 
-        self.module_logger.debug("applied raw block slot={d} raw block={s}", .{ block.slot, block_str_2 });
+        self.module_logger.debug("applied raw block opts={any} raw block={s}", .{ opts, block_str_2 });
 
         // 3. cache state to save recompute while adding the block on publish
         var block_root: [32]u8 = undefined;
@@ -688,7 +694,7 @@ pub const BeamChain = struct {
 
                     self.forkChoice.onAttestation(attestation, true) catch |e| {
                         zeam_metrics.metrics.lean_attestations_invalid_total.incr(.{ .source = "block" }) catch {};
-                        self.module_logger.err("error processing block attestation validator={d} slot={d} error={any}", .{ attestation.validator_id, attestation.data.slot, e });
+                        self.module_logger.err("error processing block attestation={any} error={any}", .{ attestation, e });
                         continue;
                     };
                     zeam_metrics.metrics.lean_attestations_valid_total.incr(.{ .source = "block" }) catch {};
@@ -710,7 +716,7 @@ pub const BeamChain = struct {
             .signature = proposer_signature,
         };
         self.forkChoice.onGossipAttestation(signed_proposer_attestation, false) catch |e| {
-            self.module_logger.err("error processing proposer attestation validator={d} slot={d} error={any}", .{ signed_proposer_attestation.validator_id, signed_proposer_attestation.message.slot, e });
+            self.module_logger.err("error processing proposer attestation={any} error={any}", .{ signed_proposer_attestation, e });
         };
 
         const processing_time = onblock_timer.observe();
