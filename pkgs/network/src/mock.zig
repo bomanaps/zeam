@@ -160,6 +160,8 @@ pub const Mock = struct {
             // Deliver error if present
             if (self.error_response) |err_resp| {
                 mock.notifyError(self.request_id, self.method, err_resp.code, err_resp.message);
+                // Free the copied message after notifyError (which makes its own copy)
+                mock.allocator.free(@constCast(err_resp.message));
                 mock.allocator.free(self.responses);
                 mock.allocator.destroy(self);
                 return;
@@ -190,6 +192,10 @@ pub const Mock = struct {
                     resp.deinit();
                 }
                 mock.allocator.free(task.responses);
+                // Free copied error message if present
+                if (task.error_response) |err_resp| {
+                    mock.allocator.free(@constCast(err_resp.message));
+                }
                 mock.allocator.destroy(task);
                 mock.allocator.destroy(completion);
             }
@@ -514,8 +520,10 @@ pub const Mock = struct {
         if (ctx.finished) {
             return StreamError.StreamAlreadyFinished;
         }
-        // Buffer the error for async delivery
-        ctx.error_response = .{ .code = code, .message = message };
+        // Buffer the error for async delivery - copy message to avoid use-after-free
+        // since the original message slice may be freed before deferred delivery
+        const message_copy = try ctx.mock.allocator.dupe(u8, message);
+        ctx.error_response = .{ .code = code, .message = message_copy };
         ctx.finished = true;
         // Schedule async delivery - don't finalize stream here, let the timer callback do it
         ctx.mock.scheduleDeferredResponse(ctx);

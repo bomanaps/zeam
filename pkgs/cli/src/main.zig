@@ -391,19 +391,27 @@ fn mainInner() !void {
             var backend3: networks.NetworkInterface = undefined;
 
             // These are owned by the network implementations and will be freed in their deinit functions
-            // We will run network1 and network2 after the nodes are running to avoid race conditions
+            // We will run network1, network2, and network3 after the nodes are running to avoid race conditions
             var network1: *networks.EthLibp2p = undefined;
             var network2: *networks.EthLibp2p = undefined;
-            var listen_addresses1: []Multiaddr = undefined;
-            var listen_addresses2: []Multiaddr = undefined;
-            var connect_peers: []Multiaddr = undefined;
+            var network3: *networks.EthLibp2p = undefined;
+            // Initialize to empty slices to avoid undefined behavior in defer when mock_network=true
+            var listen_addresses1: []Multiaddr = &.{};
+            var listen_addresses2: []Multiaddr = &.{};
+            var listen_addresses3: []Multiaddr = &.{};
+            var connect_peers: []Multiaddr = &.{};
+            var connect_peers3: []Multiaddr = &.{};
             defer {
                 for (listen_addresses1) |addr| addr.deinit();
-                allocator.free(listen_addresses1);
+                if (listen_addresses1.len > 0) allocator.free(listen_addresses1);
                 for (listen_addresses2) |addr| addr.deinit();
-                allocator.free(listen_addresses2);
+                if (listen_addresses2.len > 0) allocator.free(listen_addresses2);
+                for (listen_addresses3) |addr| addr.deinit();
+                if (listen_addresses3.len > 0) allocator.free(listen_addresses3);
                 for (connect_peers) |addr| addr.deinit();
-                allocator.free(connect_peers);
+                if (connect_peers.len > 0) allocator.free(connect_peers);
+                for (connect_peers3) |addr| addr.deinit();
+                if (connect_peers3.len > 0) allocator.free(connect_peers3);
             }
 
             // Create shared registry for beam simulation with validator ID mappings
@@ -472,7 +480,29 @@ fn mainInner() !void {
                     .node_registry = test_registry2,
                 }, logger2_config.logger(.network));
                 backend2 = network2.getNetworkInterface();
-                logger1_config.logger(null).debug("--- ethlibp2p gossip={any}", .{backend1.gossip});
+
+                // init network3 for node 3 (delayed sync node)
+                network3 = try allocator.create(networks.EthLibp2p);
+                const key_pair3 = enr_lib.KeyPair.generate();
+                const priv_key3 = key_pair3.v4.toString();
+                listen_addresses3 = try allocator.dupe(Multiaddr, &[_]Multiaddr{try Multiaddr.fromString(allocator, "/ip4/0.0.0.0/tcp/9003")});
+                connect_peers3 = try allocator.dupe(Multiaddr, &[_]Multiaddr{try Multiaddr.fromString(allocator, "/ip4/127.0.0.1/tcp/9001")});
+                const network_name3 = try allocator.dupe(u8, chain_config.spec.name);
+                errdefer allocator.free(network_name3);
+                const test_registry3 = try allocator.create(node_lib.NodeNameRegistry);
+                test_registry3.* = node_lib.NodeNameRegistry.init(allocator);
+                errdefer allocator.destroy(test_registry3);
+
+                network3.* = try networks.EthLibp2p.init(allocator, loop, .{
+                    .networkId = 2,
+                    .network_name = network_name3,
+                    .local_private_key = &priv_key3,
+                    .listen_addresses = listen_addresses3,
+                    .connect_peers = connect_peers3,
+                    .node_registry = test_registry3,
+                }, logger3_config.logger(.network));
+                backend3 = network3.getNetworkInterface();
+                logger1_config.logger(null).debug("--- ethlibp2p gossip {any}", .{backend1.gossip});
             }
 
             var clock = try allocator.create(Clock);
@@ -589,6 +619,7 @@ fn mainInner() !void {
             if (!mock_network) {
                 try network1.run();
                 try network2.run();
+                try network3.run();
             }
 
             try clock.run();

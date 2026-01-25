@@ -1517,6 +1517,7 @@ test "Node: cacheFetchedBlock deduplicates children entries on repeated caching"
 
     var ctx = try testing.NodeTestContext.init(allocator, .{});
     defer ctx.deinit();
+    ctx.fixupDbLogger(); // Fix dangling logger pointer after struct has stable address
 
     var mock = try networks.Mock.init(allocator, ctx.loopPtr(), ctx.loggerConfig().logger(.mock), null);
     defer mock.deinit();
