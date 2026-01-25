@@ -241,7 +241,7 @@ fn mainInner() !void {
     const monocolor_file_log = opts.args.monocolor_file_log;
     const console_log_level = opts.args.console_log_level;
 
-    std.debug.print("opts={any}\n", .{opts.args});
+    std.debug.print("opts={any} genesis={d}\n", .{ opts.args, genesis });
 
     switch (opts.args.__commands__) {
         .clock => {
