@@ -133,7 +133,7 @@ pub const BeamNode = struct {
 
                 // Compute block root first - needed for both caching and pending tracking
                 var block_root: types.Root = undefined;
-                ssz.hashTreeRoot(types.BeamBlock, signed_block.message.block, &block_root, self.allocator) catch |err| {
+                zeam_utils.hashTreeRoot(types.BeamBlock, signed_block.message.block, &block_root, self.allocator) catch |err| {
                     self.logger.warn("failed to compute block root for incoming gossip block: {any}", .{err});
                     return;
                 };
