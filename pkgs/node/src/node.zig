@@ -131,18 +131,69 @@ pub const BeamNode = struct {
                     self.node_registry.getNodeNameFromPeerId(sender_peer_id),
                 });
 
+                // Compute block root first - needed for both caching and pending tracking
+                var block_root: types.Root = undefined;
+                ssz.hashTreeRoot(types.BeamBlock, signed_block.message.block, &block_root, self.allocator) catch |err| {
+                    self.logger.warn("failed to compute block root for incoming gossip block: {any}", .{err});
+                    return;
+                };
+                _ = self.network.removePendingBlockRoot(block_root);
+
                 if (!hasParentBlock) {
+                    // Check if cache is full to prevent unbounded growth
+                    if (self.network.fetched_blocks.count() >= constants.MAX_CACHED_BLOCKS) {
+                        self.logger.warn(
+                            "Block cache full ({d} blocks), discarding gossip block 0x{s}",
+                            .{ constants.MAX_CACHED_BLOCKS, std.fmt.fmtSliceHexLower(block_root[0..]) },
+                        );
+                        return;
+                    }
+
+                    // Check if already cached (avoid duplicate caching)
+                    if (self.network.hasFetchedBlock(block_root)) {
+                        self.logger.debug(
+                            "Gossip block 0x{s} already cached, skipping",
+                            .{std.fmt.fmtSliceHexLower(block_root[0..])},
+                        );
+                        return;
+                    }
+
+                    // Cache this block for later processing when parent arrives
+                    const block_ptr = self.allocator.create(types.SignedBlockWithAttestation) catch |err| {
+                        self.logger.warn("failed to allocate block for caching: {any}", .{err});
+                        return;
+                    };
+
+                    types.sszClone(self.allocator, types.SignedBlockWithAttestation, signed_block, block_ptr) catch |err| {
+                        self.allocator.destroy(block_ptr);
+                        self.logger.warn("failed to clone gossip block for caching: {any}", .{err});
+                        return;
+                    };
+
+                    self.network.cacheFetchedBlock(block_root, block_ptr) catch |err| {
+                        block_ptr.deinit();
+                        self.allocator.destroy(block_ptr);
+                        self.logger.warn("failed to cache gossip block: {any}", .{err});
+                        return;
+                    };
+
+                    self.logger.debug(
+                        "Cached gossip block 0x{s} at slot {d}, fetching parent 0x{s}",
+                        .{
+                            std.fmt.fmtSliceHexLower(block_root[0..]),
+                            block.slot,
+                            std.fmt.fmtSliceHexLower(parent_root[0..]),
+                        },
+                    );
+
+                    // Fetch the parent block
                     const roots = [_]types.Root{parent_root};
                     self.fetchBlockByRoots(&roots, 0) catch |err| {
-                        self.logger.warn("failed to fetch block by root: {any}", .{err});
+                        self.logger.warn("failed to fetch parent block by root: {any}", .{err});
                     };
-                }
 
-                var block_root: types.Root = undefined;
-                if (zeam_utils.hashTreeRoot(types.BeamBlock, signed_block.message.block, &block_root, self.allocator)) |_| {
-                    _ = self.network.removePendingBlockRoot(block_root);
-                } else |err| {
-                    self.logger.warn("failed to compute block root for incoming gossip block: {any}", .{err});
+                    // Return early - don't pass to chain until parent arrives
+                    return;
                 }
             },
             .attestation => |signed_attestation| {
@@ -862,6 +913,14 @@ pub const BeamNode = struct {
     }
 
     pub fn run(self: *Self) !void {
+        // Catch up fork choice time to current interval before processing any requests.
+        // This prevents FutureSlot errors when receiving blocks via RPC immediately after starting.
+        const current_interval = self.clock.current_interval;
+        if (current_interval > 0) {
+            try self.chain.forkChoice.onInterval(@intCast(current_interval), false);
+            self.logger.info("fork choice time caught up to interval {d}", .{current_interval});
+        }
+
         const handler = try self.getOnGossipCbHandler();
         var topics = [_]networks.GossipTopic{ .block, .attestation };
         try self.network.backend.gossip.subscribe(&topics, handler);

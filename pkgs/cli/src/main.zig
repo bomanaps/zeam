@@ -550,12 +550,12 @@ fn mainInner() !void {
             });
 
             // Delayed runner - only needs the node pointer since init() is already done
-            // With 3 validators, finalization happens around slot 3-4, so we wait ~20 slots
-            // to be safe (20 slots * 4 intervals/slot = 80 intervals)
+            // Start node 3 after 20 intervals (20 seconds) to allow some blocks to be produced
+            // before node 3 joins and needs to sync
             const DelayedNodeRunner = struct {
                 beam_node: *BeamNode,
                 started: bool = false,
-                const start_after_intervals: usize = 80;
+                const start_after_intervals: usize = 20;
 
                 pub fn onInterval(ptr: *anyopaque, interval: isize) !void {
                     const self: *@This() = @ptrCast(@alignCast(ptr));
