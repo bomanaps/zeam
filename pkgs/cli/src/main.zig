@@ -579,11 +579,12 @@ fn mainInner() !void {
                 .node_registry = registry_3,
             });
 
-            // Delayed runner - only needs the node pointer since init() is already done
+            // Delayed runner - starts both network3 and node3 together
             // Start node 3 after 20 intervals (20 seconds) to allow some blocks to be produced
             // before node 3 joins and needs to sync
             const DelayedNodeRunner = struct {
                 beam_node: *BeamNode,
+                network: ?*networks.EthLibp2p = null,
                 started: bool = false,
                 const start_after_intervals: usize = 20;
 
@@ -595,6 +596,11 @@ fn mainInner() !void {
                     std.debug.print("\n=== STARTING NODE 3 (delayed sync node) at interval {d} ===\n", .{interval});
                     std.debug.print("=== Node 3 will sync from genesis using parent block syncing ===\n\n", .{});
 
+                    // Start network FIRST so node3 joins fresh without pre-cached gossip blocks
+                    if (self.network) |net| {
+                        try net.run();
+                    }
+
                     try self.beam_node.run();
                     self.started = true;
 
@@ -602,7 +608,10 @@ fn mainInner() !void {
                 }
             };
 
-            var delayed_runner = DelayedNodeRunner{ .beam_node = &beam_node_3 };
+            var delayed_runner = DelayedNodeRunner{
+                .beam_node = &beam_node_3,
+                .network = if (!mock_network) network3 else null,
+            };
             const delayed_cb = try allocator.create(node_lib.utils.OnIntervalCbWrapper);
             delayed_cb.* = .{
                 .ptr = &delayed_runner,
@@ -619,7 +628,8 @@ fn mainInner() !void {
             if (!mock_network) {
                 try network1.run();
                 try network2.run();
-                try network3.run();
+                // network3.run() is called in DelayedNodeRunner.onInterval
+                // to ensure node3 joins fresh without pre-cached gossip blocks
             }
 
             try clock.run();
