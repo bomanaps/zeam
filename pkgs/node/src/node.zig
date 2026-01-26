@@ -178,6 +178,28 @@ pub const BeamNode = struct {
                 }
                 return;
             }
+            // If block validation failed due to unknown parent, log at appropriate level
+            // based on whether we're already fetching the parent.
+            if (err == chainFactory.BlockValidationError.UnknownParentBlock) {
+                if (data.* == .block) {
+                    const block = data.block.message.block;
+                    const parent_root = block.parent_root;
+                    if (self.network.hasPendingBlockRoot(parent_root)) {
+                        // Parent is already being fetched - this is expected during sync
+                        self.logger.debug("gossip block validation deferred slot={d} parent=0x{s} (parent fetch in progress)", .{
+                            block.slot,
+                            std.fmt.fmtSliceHexLower(&parent_root),
+                        });
+                    } else {
+                        // Parent is not being fetched - unexpected, worth warning about
+                        self.logger.warn("gossip block validation failed slot={d} with unknown parent=0x{s}", .{
+                            block.slot,
+                            std.fmt.fmtSliceHexLower(&parent_root),
+                        });
+                    }
+                }
+                return;
+            }
             return err;
         };
         self.handleGossipProcessingResult(result);
