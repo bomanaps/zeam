@@ -125,9 +125,6 @@ pub const BeamChain = struct {
         try types.sszClone(allocator, types.BeamState, opts.anchorState.*, cloned_anchor_state);
         try states.put(fork_choice.head.blockRoot, cloned_anchor_state);
 
-        // Initialize validators count to 0 by default (spec requires "On scrape" availability)
-        zeam_metrics.metrics.lean_validators_count.set(0);
-
         return Self{
             .nodeId = opts.nodeId,
             .config = opts.config,
