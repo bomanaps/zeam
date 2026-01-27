@@ -162,45 +162,74 @@ pub const BeamNode = struct {
         }
 
         const result = self.chain.onGossip(data, sender_peer_id) catch |err| {
-            // If a block is rejected because it's before finalized, drop it and prune any cached
-            // descendants we might still be holding onto.
-            if (err == forkchoice.ForkChoiceError.PreFinalizedSlot) {
-                if (data.* == .block) {
-                    const signed_block = data.block;
-                    var block_root: types.Root = undefined;
-                    if (zeam_utils.hashTreeRoot(types.BeamBlock, signed_block.message.block, &block_root, self.allocator)) |_| {
-                        self.logger.info(
-                            "gossip block 0x{s} rejected as pre-finalized; pruning cached descendants",
-                            .{std.fmt.fmtSliceHexLower(block_root[0..])},
-                        );
-                        self.pruneCachedBlockSubtree(block_root);
-                    } else |_| {}
-                }
-                return;
-            }
-            // If block validation failed due to unknown parent, log at appropriate level
-            // based on whether we're already fetching the parent.
-            if (err == chainFactory.BlockValidationError.UnknownParentBlock) {
-                if (data.* == .block) {
-                    const block = data.block.message.block;
-                    const parent_root = block.parent_root;
-                    if (self.network.hasPendingBlockRoot(parent_root)) {
-                        // Parent is already being fetched - this is expected during sync
-                        self.logger.debug("gossip block validation deferred slot={d} parent=0x{s} (parent fetch in progress)", .{
-                            block.slot,
-                            std.fmt.fmtSliceHexLower(&parent_root),
-                        });
-                    } else {
-                        // Parent is not being fetched - unexpected, worth warning about
-                        self.logger.warn("gossip block validation failed slot={d} with unknown parent=0x{s}", .{
-                            block.slot,
-                            std.fmt.fmtSliceHexLower(&parent_root),
-                        });
+            switch (err) {
+                // Block rejected because it's before finalized - drop it and prune any cached
+                // descendants we might still be holding onto.
+                error.PreFinalizedSlot => {
+                    if (data.* == .block) {
+                        const signed_block = data.block;
+                        var block_root: types.Root = undefined;
+                        if (zeam_utils.hashTreeRoot(types.BeamBlock, signed_block.message.block, &block_root, self.allocator)) |_| {
+                            self.logger.info(
+                                "gossip block 0x{s} rejected as pre-finalized; pruning cached descendants",
+                                .{std.fmt.fmtSliceHexLower(block_root[0..])},
+                            );
+                            self.pruneCachedBlockSubtree(block_root);
+                        } else |_| {}
                     }
-                }
-                return;
+                    return;
+                },
+                // Block validation failed due to unknown parent - log at appropriate level
+                // based on whether we're already fetching the parent.
+                error.UnknownParentBlock => {
+                    if (data.* == .block) {
+                        const block = data.block.message.block;
+                        const parent_root = block.parent_root;
+                        if (self.network.hasPendingBlockRoot(parent_root)) {
+                            self.logger.debug("gossip block validation deferred slot={d} parent=0x{s} (parent fetch in progress)", .{
+                                block.slot,
+                                std.fmt.fmtSliceHexLower(&parent_root),
+                            });
+                        } else {
+                            self.logger.warn("gossip block validation failed slot={d} with unknown parent=0x{s}", .{
+                                block.slot,
+                                std.fmt.fmtSliceHexLower(&parent_root),
+                            });
+                        }
+                    }
+                    return;
+                },
+                // Attestation validation failed due to missing head/source/target block -
+                // downgrade to debug when the missing block is already being fetched.
+                error.UnknownHeadBlock, error.UnknownSourceBlock, error.UnknownTargetBlock => {
+                    if (data.* == .attestation) {
+                        const att = data.attestation;
+                        const att_data = att.message;
+                        const missing_root = if (err == error.UnknownHeadBlock)
+                            att_data.head.root
+                        else if (err == error.UnknownSourceBlock)
+                            att_data.source.root
+                        else
+                            att_data.target.root;
+
+                        if (self.network.hasPendingBlockRoot(missing_root)) {
+                            self.logger.debug("gossip attestation validation deferred slot={d} validator={d} error={any} (block fetch in progress)", .{
+                                att_data.slot,
+                                att.validator_id,
+                                err,
+                            });
+                        } else {
+                            self.logger.warn("gossip attestation validation failed slot={d} validator={d} error={any}", .{
+                                att_data.slot,
+                                att.validator_id,
+                                err,
+                            });
+                        }
+                    }
+                    return;
+                },
+                else => return err,
             }
-            return err;
         };
         self.handleGossipProcessingResult(result);
     }

@@ -568,9 +568,16 @@ pub const BeamChain = struct {
 
                 // Validate attestation before processing (gossip = not from block)
                 self.validateAttestation(signed_attestation.toAttestation(), false) catch |err| {
-                    self.module_logger.warn("gossip attestation validation failed: {any}", .{err});
                     zeam_metrics.metrics.lean_attestations_invalid_total.incr(.{ .source = "gossip" }) catch {};
-                    return .{}; // Drop invalid gossip attestations
+                    // Propagate unknown block errors to node.zig for context-aware logging
+                    // (downgrade to debug when the missing block is already being fetched)
+                    switch (err) {
+                        error.UnknownHeadBlock, error.UnknownSourceBlock, error.UnknownTargetBlock => return err,
+                        else => {
+                            self.module_logger.warn("gossip attestation validation failed: {any}", .{err});
+                            return .{};
+                        },
+                    }
                 };
 
                 // Process validated attestation
