@@ -580,20 +580,25 @@ fn mainInner() !void {
             });
 
             // Delayed runner - starts both network3 and node3 together
-            // Start node 3 after 20 intervals (20 seconds) to allow some blocks to be produced
-            // before node 3 joins and needs to sync
+            // Node 3 starts only after finalization has advanced beyond genesis on node 1,
+            // ensuring there are finalized blocks for node 3 to sync from.
             const DelayedNodeRunner = struct {
                 beam_node: *BeamNode,
+                /// Reference node whose finalization status determines when node 3 starts
+                reference_node: *BeamNode,
                 network: ?*networks.EthLibp2p = null,
                 started: bool = false,
-                const start_after_intervals: usize = 20;
 
                 pub fn onInterval(ptr: *anyopaque, interval: isize) !void {
                     const self: *@This() = @ptrCast(@alignCast(ptr));
                     if (self.started) return;
-                    if (interval < 0 or @as(usize, @intCast(interval)) < start_after_intervals) return;
+
+                    // Wait until finalization has advanced beyond genesis on the reference node
+                    const finalized_slot = self.reference_node.chain.forkChoice.fcStore.latest_finalized.slot;
+                    if (finalized_slot == 0) return;
 
                     std.debug.print("\n=== STARTING NODE 3 (delayed sync node) at interval {d} ===\n", .{interval});
+                    std.debug.print("=== Finalization reached slot {d} on reference node — starting node 3 ===\n", .{finalized_slot});
                     std.debug.print("=== Node 3 will sync from genesis using parent block syncing ===\n\n", .{});
 
                     // Start network FIRST so node3 joins fresh without pre-cached gossip blocks
@@ -610,6 +615,7 @@ fn mainInner() !void {
 
             var delayed_runner = DelayedNodeRunner{
                 .beam_node = &beam_node_3,
+                .reference_node = &beam_node_1,
                 .network = if (!mock_network) network3 else null,
             };
             const delayed_cb = try allocator.create(node_lib.utils.OnIntervalCbWrapper);
