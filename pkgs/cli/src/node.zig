@@ -439,7 +439,6 @@ pub const Node = struct {
             defer self.allocator.free(public_ssz);
 
             var keypair = try xmss.KeyPair.fromSsz(
-                self.allocator,
                 secret_ssz,
                 public_ssz,
             );
