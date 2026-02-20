@@ -566,4 +566,3 @@ test "HashSig: verify fails with zero signature" {
 
     try std.testing.expectError(HashSigError.VerificationFailed, verification_failed_result);
 }
-
