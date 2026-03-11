@@ -184,6 +184,9 @@ pub fn verifySingleAttestation(
 
     const epoch: u32 = @intCast(attestation_data.slot);
 
+    // Increment total signatures counter for verification path (signatures received from wire)
+    zeam_metrics.metrics.lean_pq_sig_attestation_signatures_total.incr();
+
     xmss.verifySsz(pubkey, &message, epoch, signatureBytes) catch |err| {
         _ = verification_timer.observe();
         zeam_metrics.metrics.lean_pq_sig_attestation_signatures_invalid_total.incr();

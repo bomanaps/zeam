@@ -270,9 +270,17 @@ pub const Node = struct {
 
             // Set validator status gauges on node start
             zeam_metrics.metrics.lean_is_aggregator.set(if (options.is_aggregator) 1 else 0);
-            // Committee subnet and count are placeholders until subnet logic is implemented
-            zeam_metrics.metrics.lean_attestation_committee_subnet.set(0);
-            zeam_metrics.metrics.lean_attestation_committee_count.set(0);
+            // Set committee count from config
+            const committee_count = chain_config.spec.attestation_committee_count;
+            zeam_metrics.metrics.lean_attestation_committee_count.set(committee_count);
+            // Set subnet for the first validator (if any)
+            if (validator_ids.len > 0) {
+                const first_validator_id: types.ValidatorIndex = @intCast(validator_ids[0]);
+                const subnet_id = types.computeSubnetId(first_validator_id, committee_count) catch 0;
+                zeam_metrics.metrics.lean_attestation_committee_subnet.set(subnet_id);
+            } else {
+                zeam_metrics.metrics.lean_attestation_committee_subnet.set(0);
+            }
 
             // Start API server (pass chain pointer for chain-dependent endpoints)
             self.api_server_handle = try api_server.startAPIServer(
